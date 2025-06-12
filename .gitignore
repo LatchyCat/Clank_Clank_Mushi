@@ -1,5 +1,18 @@
-# Environment variables
-.env
-
 # Python virtual environment
 venv/
+.venv/
+__pycache__/
+
+# Node.js dependencies
+mushi-frontend/node_modules/
+mushi-frontend/package-lock.json
+
+# Other common ignores
+*.pyc
+.DS_Store
+.env # If you have a .env file, you usually don't want to commit it
+
+# Backend specific ignores that might have been in backend/.gitignore
+# e.g., if you have any database files or logs
+vector_db.pkl.gz
+*.log
