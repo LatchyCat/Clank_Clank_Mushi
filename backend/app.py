@@ -8,18 +8,18 @@ from flask_apscheduler import APScheduler
 import logging
 
 # Import global instances from the new globals.py module
-from globals import global_vector_store, global_ollama_embedder, global_clustering_service # Import global_clustering_service
+from globals import global_vector_store, global_ollama_embedder, global_clustering_service, global_data_embedding_service # Import global_data_embedding_service
 
 # Import other components
-from services.data_embedding_service import DataEmbeddingService
+# DataEmbeddingService is now initialized in globals.py
 
 # Import all blueprints from their respective files
 from routes.news_api_routes import news_bp as news_api_bp
 from routes.one_piece_api_routes import one_piece_api_bp
 from routes.llm_api_routes import llm_api_bp
-from routes.shikimori_api_routes import shikimori_api_bp
 from routes.suggest_questions import suggest_questions_bp
 from routes.data_api_routes import data_api_bp # Import the new data API blueprint
+from routes.aniwatch_api_routes import aniwatch_api_bp # NEW: Import Aniwatch API blueprint
 
 # Import controllers to initialize them
 from controllers.data_controller import DataController # Import the new DataController
@@ -29,8 +29,7 @@ from controllers.data_controller import DataController # Import the new DataCont
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logging.getLogger('apscheduler').setLevel(logging.INFO) # Keep APScheduler logs informative
 
-# Initialize data embedding service here, using the global instances
-global_data_embedding_service = DataEmbeddingService(global_vector_store, global_ollama_embedder)
+# global_data_embedding_service is now initialized in globals.py
 
 # Initialize scheduler
 scheduler = APScheduler()
@@ -39,7 +38,8 @@ scheduler = APScheduler()
 # THIS FUNCTION MUST BE DEFINED BEFORE create_app() FOR THE SCHEDULER TO FIND IT
 def update_ann_data_and_save_job():
     logging.info("Running scheduled ANN data update and save job...")
-    global_data_embedding_service.embed_ann_data()
+    # Use the new detailed embedding method
+    global_data_embedding_service.embed_ann_details_data(limit=100) # You can adjust the limit here
     global_vector_store.save() # Ensure the vector store is saved after updates
     logging.info("Scheduled ANN data update and save job finished.")
 
@@ -76,6 +76,7 @@ def create_app():
     logging.info("--- Initial Vector Store Data Loading/Embedding ---")
     if not global_vector_store.documents: # Only embed if store is empty
         logging.info("Vector store is empty. Performing initial data embedding...")
+        # Call the embed_all_data method to trigger both One Piece and ANN detailed embedding
         global_data_embedding_service.embed_all_data()
         global_vector_store.save() # Save after initial embedding
         logging.info("Initial data embedding complete and vector store saved.")
@@ -88,12 +89,14 @@ def create_app():
     app.register_blueprint(news_api_bp)
     app.register_blueprint(one_piece_api_bp)
     app.register_blueprint(llm_api_bp)
-    app.register_blueprint(shikimori_api_bp)
+
     app.register_blueprint(suggest_questions_bp)
     app.register_blueprint(data_api_bp) # Register the new data API blueprint
+    app.register_blueprint(aniwatch_api_bp) # NEW: Register Aniwatch API blueprint
 
     # Initialize controllers that depend on global services
-    DataController.initialize(global_clustering_service) # Initialize DataController with the global clustering service
+    # Now pass both clustering_service and data_embedding_service
+    DataController.initialize(global_clustering_service, global_data_embedding_service)
 
     @app.route('/')
     def index():

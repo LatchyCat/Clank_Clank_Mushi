@@ -34,5 +34,37 @@ def get_clusters():
 
     return jsonify(response_data), status_code
 
-# You can add more data-related endpoints here in the future if needed,
-# e.g., for specific data filters, statistical summaries, etc.
+@data_api_bp.route('/ingest_ann_data', methods=['POST'])
+def ingest_ann_data_route():
+    """
+    API endpoint to trigger the ingestion of recent ANN data into the vector store.
+    Allows specifying the limit of items to process via a query parameter.
+    Example: POST /api/data/ingest_ann_data?limit=100
+    """
+    limit = request.args.get('limit', 100, type=int) # Default to 100 items
+
+    if limit <= 0:
+        return jsonify({"error": "Limit must be a positive integer."}), 400
+
+    logger.info(f"API Request: /api/data/ingest_ann_data with limit={limit}")
+
+    response_data, status_code = DataController.ingest_ann_data(limit=limit)
+    return jsonify(response_data), status_code
+
+@data_api_bp.route('/ingest_aniwatch_data', methods=['POST'])
+def ingest_aniwatch_data_route():
+    """
+    API endpoint to trigger the ingestion of Aniwatch data into the vector store.
+    Allows specifying the limit of items to process and page limit via query parameters.
+    Example: POST /api/data/ingest_aniwatch_data?limit=100&page_limit=5
+    """
+    limit = request.args.get('limit', 100, type=int)
+    page_limit = request.args.get('page_limit', 5, type=int)
+
+    if limit <= 0 or page_limit <= 0:
+        return jsonify({"error": "Limit and page_limit must be positive integers."}), 400
+
+    logger.info(f"API Request: /api/data/ingest_aniwatch_data with limit={limit}, page_limit={page_limit}")
+
+    response_data, status_code = DataController.ingest_aniwatch_data(limit=limit, page_limit=page_limit)
+    return jsonify(response_data), status_code

@@ -1,10 +1,10 @@
-# backend/controllers/news_controller.py (FURTHER UPDATED)
+# backend/controllers/news_controller.py (FINALIZED FIX FOR ANN PARSING)
 import xml.etree.ElementTree as ET
 from services.ann_api_service import ANNAPIService
 from flask import current_app, Blueprint, jsonify, request
 
-# Create a Blueprint for news routes
-news_bp = Blueprint('news', __name__)
+# Create a Blueprint for news routes with the correct URL prefix
+news_bp = Blueprint('news', __name__, url_prefix='/api/news')
 
 class NewsController:
     """
@@ -81,10 +81,10 @@ class NewsController:
             elif ET.iselement(xml_root_or_error):
                 root = xml_root_or_error
                 titles = []
-                # Find all 'title' elements directly under the 'ann' root
+                # CORRECTED: For search results, the name is typically an attribute of the <title> tag
                 for title_elem in root.findall('.//title'):
                     title_id = title_elem.get('id')
-                    title_name = title_elem.find('info[@type="Main title"]').text if title_elem.find('info[@type="Main title"]') is not None else None
+                    title_name = title_elem.get('name') # Get name from attribute
                     title_type = title_elem.get('type') # e.g., manga, anime, OAV, movie
 
                     if title_id and title_name:
@@ -114,33 +114,42 @@ class NewsController:
             if isinstance(xml_root_or_error, dict) and "error" in xml_root_or_error:
                 print(f"DEBUG: NewsController: Error from service: {xml_root_or_error.get('error')}")
                 return xml_root_or_error, xml_root_or_error.get('status_code', 500)
-            elif xml_root_or_error is None:
+            elif xml_root_or_error is None: # Corrected from === None to is None
                 return {"error": "Failed to fetch title details: Service returned no data."}, 500
             elif ET.iselement(xml_root_or_error):
                 root = xml_root_or_error
-                title_elem = root.find('title') # The root is <ann>, we look for <title> inside
+                # CORRECTED: For direct ID lookup, the item is typically an <anime>, <manga>, or <movie> tag
+                # directly under the <ann> root, not a <title> tag.
+                title_elem = None
+                for child in root:
+                    if child.tag in ['anime', 'manga', 'movie', 'ova', 'movie']: # Added 'ova' for completeness
+                        title_elem = child
+                        break
+
                 if title_elem is None:
-                    print(f"DEBUG: NewsController: No title element found for ID {title_id}.")
+                    print(f"DEBUG: NewsController: No item element found for ID {title_id}.")
                     return {"error": f"Title with ID {title_id} not found or no details available."}, 404
 
                 title_details = {
                     "id": title_elem.get('id'),
-                    "type": title_elem.get('type'),
+                    "type": title_elem.get('type'), # Get type directly from the <anime>/<manga>/<movie> tag
                     "genres": [],
                     "themes": [],
                     "staff": [],
                     "episodes": None,
                     "vintage": None,
                     "main_title": None,
-                    "alternative_titles": []
+                    "alternative_titles": [],
+                    "description": None, # Will extract plot summary here
+                    "related_titles": [] # Will extract related titles
                 }
 
-                # Extract main title and alternative titles
+                # Extract info tags (Main title, Alternative title, Genres, Themes, Episodes, Vintage, Plot Summary)
                 for info_elem in title_elem.findall('info'):
                     info_type = info_elem.get('type')
                     if info_type == "Main title":
                         title_details["main_title"] = info_elem.text
-                    elif info_type == "Alternative title":
+                    elif info_type == "Alternative title" and info_elem.text:
                         title_details["alternative_titles"].append(info_elem.text)
                     elif info_type == "Genres" and info_elem.text:
                         title_details["genres"].append(info_elem.text)
@@ -150,21 +159,54 @@ class NewsController:
                         try:
                             title_details["episodes"] = int(info_elem.text)
                         except (ValueError, TypeError):
-                            title_details["episodes"] = None # Keep as None if conversion fails
+                            title_details["episodes"] = None
                     elif info_type == "Vintage" and info_elem.text:
+                        # Vintage can contain multiple dates (e.g., initial run, international release)
+                        # For simplicity, taking the first one or concatenating
                         title_details["vintage"] = info_elem.text
+                    elif info_type == "Plot Summary" and info_elem.text: # ADDED: Extract description (Plot Summary)
+                        title_details["description"] = info_elem.text
 
 
                 # Extract staff roles
                 for staff_elem in title_elem.findall('staff'):
                     task = staff_elem.find('task').text if staff_elem.find('task') is not None else "Unknown Task"
                     person = staff_elem.find('person').text if staff_elem.find('person') is not None else "Unknown Person"
-                    staff_id = staff_elem.find('person').get('id') if staff_elem.find('person') is not None else None
+                    person_id = staff_elem.find('person').get('id') if staff_elem.find('person') is not None else None
                     title_details["staff"].append({
                         "task": task,
                         "person": person,
-                        "person_id": staff_id
+                        "person_id": person_id
                     })
+
+                # Extract related titles (e.g., prequel, sequel, adapted from)
+                # ANN uses tags like <related-prev>, <related-next>, <related-other>
+                for related_elem in title_elem.findall('related-prev') + \
+                                    title_elem.findall('related-next') + \
+                                    title_elem.findall('related-other') + \
+                                    title_elem.findall('related'): # Catch any generic 'related' tag
+                    relation = related_elem.get('rel')
+                    related_id = related_elem.get('id')
+
+                    # Some related tags might have a 'type' or 'name' attribute, or a child 'title' tag.
+                    # We'll prioritize attributes if available, then check for a child 'title'
+                    related_type = related_elem.get('type')
+                    related_name = related_elem.get('name')
+
+                    # If name is not directly on the <related-*> tag, check for a child <title>
+                    if not related_name:
+                        child_title_elem = related_elem.find('title')
+                        if child_title_elem is not None:
+                            related_name = child_title_elem.text
+
+                    if relation and related_id:
+                        title_details["related_titles"].append({
+                            "relation": relation,
+                            "id": related_id,
+                            "type": related_type, # May be None if not present
+                            "name": related_name # May be None if not present
+                        })
+
 
                 print(f"DEBUG: NewsController: Successfully parsed details for title ID {title_id}.")
                 return title_details, 200
@@ -185,17 +227,6 @@ class NewsController:
         """
         print(f"DEBUG: NewsController: Fetching details for staff ID: {staff_id}")
         try:
-            # The ANN API's direct 'person=ID' parameter often behaves like a search
-            # or doesn't return a direct person entry. It expects the ID in the 'person' attribute
-            # of a <person> tag, not as a direct query parameter.
-            # We are calling get_staff_ann which uses params={"person": staff_id}.
-            # The previous logs indicated this might not be working as expected.
-            # Let's verify the `get_staff_ann` behavior in `ANNAPIService`.
-            # ANNAPIService.get_staff_ann currently uses params={"person": staff_id}
-            # which for /api.xml might not work as expected for direct lookup.
-            # The API documentation implies direct person lookups are less straightforward than titles.
-            # For this example, we'll proceed assuming it *might* return some relevant XML,
-            # but this is a known tricky part of the ANN API.
             xml_root_or_error = self.ann_service.get_staff_ann(str(staff_id))
 
             if isinstance(xml_root_or_error, dict) and "error" in xml_root_or_error:
@@ -205,13 +236,9 @@ class NewsController:
                 return {"error": "Failed to fetch staff details: Service returned no data."}, 500
             elif ET.iselement(xml_root_or_error):
                 root = xml_root_or_error
-                # ANN API structure for staff details can be complex.
-                # Assuming a direct 'person' element under 'ann' if found.
                 person_elem = root.find('person')
                 if person_elem is None:
                     print(f"DEBUG: NewsController: No person element found for ID {staff_id}.")
-                    # If it's a search result, it might contain 'person' elements under 'ann'.
-                    # For now, let's assume direct lookup is expected.
                     return {"error": f"Staff with ID {staff_id} not found or no details available."}, 404
 
                 staff_data = {

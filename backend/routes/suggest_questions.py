@@ -15,17 +15,29 @@ def suggest_questions():
     Example: POST /api/llm/suggest-questions
     Request Body: {"content": "The Straw Hat Pirates landed on Egghead Island..."}
     """
-    data = request.get_json()
-    content_to_analyze = data.get('content')
+    # Check if the request method is POST before trying to get JSON
+    if request.method == 'POST':
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({"error": "Request must contain a JSON body."}), 400
 
-    if not content_to_analyze:
-        return jsonify({"error": "Missing 'content' field in request body for question suggestion."}), 400
+            content_to_analyze = data.get('content')
 
-    # Call the LLMController to generate suggested questions
-    # We'll add this method in the next step
-    suggested_questions, status_code = LLMController.generate_suggested_questions(content_to_analyze)
+            if not content_to_analyze:
+                return jsonify({"error": "Missing 'content' field in request body for question suggestion."}), 400
 
-    if status_code == 200:
-        return jsonify({"suggested_questions": suggested_questions}), status_code
+            # Call the LLMController to generate suggested questions
+            suggested_questions, status_code = LLMController.generate_suggested_questions(content_to_analyze)
+
+            if status_code == 200:
+                return jsonify({"suggested_questions": suggested_questions}), status_code
+            else:
+                return jsonify({"error": suggested_questions}), status_code
+        except Exception as e:
+            # Catch any error during JSON parsing or data retrieval for robustness
+            return jsonify({"error": f"An error occurred while processing your request: {str(e)}"}), 400
     else:
-        return jsonify({"error": suggested_questions}), status_code
+        # This branch should ideally not be hit if Flask-CORS is working correctly for OPTIONS
+        # but it serves as a fallback/defensive measure.
+        return jsonify({"message": "Method not allowed."}), 405

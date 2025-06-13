@@ -22,14 +22,9 @@ class Config:
     # One Piece API (no auth needed, just base URL)
     ONE_PIECE_API_BASE_URL = "https://api.api-onepiece.com/v2"
 
-    # Shikimori API Configuration
-    # Base URL for Shikimori's GraphQL API (main domain, endpoint path will be appended in service)
-    SHIKIMORI_API_BASE_URL = os.getenv("SHIKIMORI_API_BASE_URL", "https://shikimori.one")
-    # OAuth2 authentication required. You will need to set these in your .env file
-    # and implement an OAuth flow to obtain and refresh tokens.
-    SHIKIMORI_CLIENT_ID = os.getenv("SHIKIMORI_CLIENT_ID")
-    SHIKIMORI_CLIENT_SECRET = os.getenv("SHIKIMORI_CLIENT_SECRET")
-    SHIKIMORI_ACCESS_TOKEN = os.getenv("SHIKIMORI_ACCESS_TOKEN") # For direct usage if OAuth flow is managed externally
+    # Aniwatch API Configuration (your locally hosted instance)
+    ANIWATCH_API_BASE_URL = os.getenv("ANIWATCH_API_BASE_URL", "http://localhost:4000")
+
 
     # --- LLM Provider Selection ---
     # Dictionary of available LLM providers for the user to choose from for GENERATION

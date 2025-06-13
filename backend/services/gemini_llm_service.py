@@ -22,67 +22,30 @@ When you generate any text, follow these rules to sound like a real person, not 
 - **No AI phrases:** Never use "dive into," "unleash," "game-changing," "revolutionary," "transformative," "leverage," "optimize," "unlock potential."
 - **Be direct:** Just say what you mean. No extra words needed.
 - **Natural flow:** It's totally fine to start sentences with "and," "but," or "so."
-- **Real voice:** Don't force enthusiasm. Just be yourself.
-
-### STYLE IMPLEMENTATION
-
-- **Conversational grammar:** Write like you're talking, not writing a school paper.
-- **Cut fluff:** Get rid of useless adjectives and adverbs.
-- **Use examples:** Show me what you mean with specific cases.
-- **Be honest:** If you don't know something, it's okay to say so. Don't make things up.
-- **Texting vibe:** Keep it casual, direct, how you'd actually text someone.
-- **Smooth transitions:** Use simple words like "here's the thing," "and," "but," "so."
-
-### AVOID THESE AI GIVEAWAYS
-
-- "Let's dive into..."
-- "Unleash your potential"
-- "Game-changing solution"
-- "Revolutionary approach"
-- "Transform your life"
-- "Unlock the secrets"
-- "Leverage this strategy"
-- "Optimize your workflow"
-
-### USE THESE INSTEAD
-
-- "Here's how it works"
-- "This can help you"
-- "Here's what I found"
-- "This might work for you"
-- "Here's the thing"
-- "And that's why it matters"
-- "But here's the problem"
-- "So here's what happened"
-
-### FINAL CHECK
-
-Before you finish, make sure your writing:
-- Sounds like something a human would say out loud.
-- Uses words a normal person would use.
-- Doesn't sound like marketing copy.
-- Feels genuine and honest.
-- Gets to the point quickly.
+- **Real voice:** Don't force enthusiasm.
 """
 
-    @staticmethod
-    def initialize_gemini():
-        """Initializes the Gemini API with the API key from config."""
-        api_key = Config.GEMINI_API_KEY
-        if not api_key:
-            print("Error: GEMINI_KEY not found in .env file or Config. Please set it.")
-            return False
-        genai.configure(api_key=api_key)
+    _initialized = False
+
+    @classmethod
+    def initialize_gemini(cls):
+        if not cls._initialized:
+            api_key = os.getenv("GEMINI_API_KEY") or Config.GEMINI_API_KEY
+            if not api_key:
+                print("Error: GEMINI_API_KEY is not set in environment variables or config.py.")
+                return False
+            genai.configure(api_key=api_key)
+            cls._initialized = True
         return True
 
     @staticmethod
-    def generate_content(user_message: str) -> str | None:
+    def generate_content(user_message: str, is_spoiler_shield_active: bool = False) -> str | None:
         """
-        Generates content using the Gemini Pro model.
-        Combines the Mushi persona prompt with the user's message.
+        Generates text content using the Gemini LLM.
 
         Args:
             user_message (str): The user's query or prompt.
+            is_spoiler_shield_active (bool): True if the spoiler shield is active, False otherwise.
 
         Returns:
             str | None: The generated text from Gemini, or None if an error occurs.
@@ -90,23 +53,27 @@ Before you finish, make sure your writing:
         if not GeminiLLMService.initialize_gemini():
             return "Error: Gemini API not configured due to missing API key."
 
+        # Adjust the system prompt based on the spoiler shield status
+        current_system_prompt = GeminiLLMService.MUSHI_SYSTEM_PROMPT
+        if is_spoiler_shield_active:
+            current_system_prompt += (
+                "\n\n**SPOILER ALERT:** If your response contains any major plot spoilers, "
+                "character deaths, significant reveals, or future events that might "
+                "ruin the experience for someone not caught up, you MUST wrap that specific "
+                "spoiler information within `<spoiler>...</spoiler>` tags. "
+                "For example: `Luffy's dream is to <spoiler>become Joyboy</spoiler>!` "
+                "Be very careful to only tag actual spoilers, not general background info. "
+                "Avoid mentioning specific chapter/episode numbers for spoilers unless explicitly asked."
+            )
+
+        full_prompt = f"{current_system_prompt}\n\nUser's request: {user_message}"
+
         try:
-            # We combine the system prompt with the user's actual message
-            # The model will interpret the initial text as its guiding instructions.
-            full_prompt = f"{GeminiLLMService.MUSHI_SYSTEM_PROMPT}\n\nUser's request: {user_message}"
-
-            # Use the 'gemini-pro' model for text generation
             model = genai.GenerativeModel('models/gemini-1.5-pro-latest')
-
-            # Generate content
-            # The response object will contain the generated text in response.text
             response = model.generate_content(full_prompt)
-
-            # Access the generated text
             return response.text
 
         except genai.types.StopCandidateException as e:
-            # This error occurs if the model's safety settings block the response
             print(f"Gemini API safety settings blocked content: {e}")
             return "I'm sorry, I cannot generate a response for that request due to safety guidelines."
         except Exception as e:
