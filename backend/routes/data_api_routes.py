@@ -68,3 +68,54 @@ def ingest_aniwatch_data_route():
 
     response_data, status_code = DataController.ingest_aniwatch_data(limit=limit, page_limit=page_limit)
     return jsonify(response_data), status_code
+
+@data_api_bp.route('/ingest_anime_api_data', methods=['POST'])
+def ingest_anime_api_data_route():
+    """
+    API endpoint to trigger the ingestion of data from the new 'anime-api' Node.js project.
+    Allows specifying the limit of items to process via a query parameter.
+    Example: POST /api/data/ingest_anime_api_data?limit=100
+    """
+    limit = request.args.get('limit', 100, type=int) # Default to 100 items
+
+    if limit <= 0:
+        return jsonify({"error": "Limit must be a positive integer."}), 400
+
+    logger.info(f"API Request: /api/data/ingest_anime_api_data with limit={limit}")
+
+    response_data, status_code = DataController.ingest_anime_api_data(limit=limit)
+    return jsonify(response_data), status_code
+
+@data_api_bp.route('/ingest_anime_api_category_data', methods=['POST'])
+def ingest_anime_api_category_data_route():
+    """
+    API endpoint to trigger the ingestion of data from specific categories of the 'anime-api' Node.js project.
+    Allows specifying categories as comma-separated string and limit per category via query parameters.
+    Example: POST /api/data/ingest_anime_api_category_data?categories=action,comedy&limit_per_category=50
+    """
+    categories_str = request.args.get('categories')
+    categories = [c.strip() for c in categories_str.split(',')] if categories_str else None
+    limit_per_category = request.args.get('limit_per_category', 50, type=int)
+
+    if limit_per_category <= 0:
+        return jsonify({"error": "Limit per category must be a positive integer."}), 400
+
+    logger.info(f"API Request: /api/data/ingest_anime_api_category_data with categories={categories}, limit_per_category={limit_per_category}")
+
+    response_data, status_code = DataController.ingest_anime_api_category_data(
+        categories=categories, limit_per_category=limit_per_category
+    )
+    return jsonify(response_data), status_code
+
+@data_api_bp.route('/ingest_all_data', methods=['POST'])
+def ingest_all_data_route():
+    """
+    API endpoint to trigger the ingestion and embedding of data from ALL configured sources
+    into the vector store. This includes One Piece, ANN, Aniwatch, and Anime API data.
+    It performs de-duplication automatically.
+    Example: POST /api/data/ingest_all_data
+    """
+    logger.info("API Request: /api/data/ingest_all_data initiated.")
+    response_data, status_code = DataController.ingest_all_data()
+    return jsonify(response_data), status_code
+

@@ -1,15 +1,15 @@
 # backend/services/data_embedding_service.py
 import logging
-import time # Import time for sleep
-from typing import List, Dict, Any, Tuple
-
-# REMOVED: Circular import - global instances are passed via constructor.
-# from globals import global_vector_store, global_ollama_embedder
+import time
+from typing import List, Dict, Any, Tuple, Optional # Ensure Optional is imported
 
 # Import services that fetch raw data
 from services.one_piece_api_service import OnePieceAPIService
-from controllers.news_controller import NewsController # ANN Recent is now via NewsController
-from controllers.aniwatch_controller import AniwatchController # Import the new AniwatchController
+from controllers.news_controller import NewsController
+from controllers.aniwatch_controller import AniwatchController
+from services.anime_api_service import AnimeAPIService # Ensure this is correctly imported
+
+logger = logging.getLogger(__name__)
 
 class DataEmbeddingService:
     """
@@ -18,302 +18,441 @@ class DataEmbeddingService:
     into the vector store.
     """
 
-    def __init__(self, vector_store, embedder):
+    def __init__(self, vector_store, embedder, anime_api_service: AnimeAPIService): # Make sure anime_api_service is expected here
         self.vector_store = vector_store
         self.embedder = embedder
         self.one_piece_api_service = OnePieceAPIService()
-        # Initialize NewsController to get ANN recent items
         self.news_controller = NewsController()
-        # Initialize AniwatchController
         self.aniwatch_controller = AniwatchController()
-        logging.debug("DataEmbeddingService: Initialized.")
+        self.anime_api_service = anime_api_service # This line is critical: ensure the passed service is assigned
+        logger.debug("DataEmbeddingService: Initialized.")
 
-    def embed_text_data(self, content: str, metadata: Dict[str, Any]):
+    def embed_text_data(self, content: str, metadata: Dict[str, Any], source_item_id: Optional[str] = None):
         """Embeds a single piece of text content with its metadata."""
         try:
+            # Check for existing document by source_item_id if p...
+            # Ensure content is a string
+            if not isinstance(content, str):
+                content = str(content) # Convert to string if it's not already
+
+            # Check if an item with this source_item_id already exists
+            if source_item_id:
+                existing_doc = self.vector_store.get_document_by_source_id(source_item_id)
+                if existing_doc:
+                    # Optionally, you could compare content/metadata and update if changed
+                    # For now, we'll just skip re-embedding if it exists
+                    logger.debug(f"Skipping embedding for existing document: {source_item_id}")
+                    return True # Indicate successful processing (skipped)
+
             embedding = self.embedder.embed_text(content)
-            if embedding is not None:
-                self.vector_store.add_document(content, embedding, metadata)
-                # logging.debug(f"VectorStore: Added document with ID {len(self.vector_store.documents) - 1}.")
-                # More detailed log for content preview
-                logging.debug(f"VectorStore: Added document from '{metadata.get('source', 'unknown')}' - Preview: '{content[:50]}...'")
+            if embedding:
+                self.vector_store.add_document(content, embedding, metadata, source_item_id)
+                return True
             else:
-                logging.warning(f"Could not generate embedding for content (first 50 chars): '{content[:50]}...'")
+                logger.warning(f"Failed to generate embedding for content (first 50 chars): '{content[:50]}'")
+                return False
         except Exception as e:
-            logging.error(f"Error embedding document (first 50 chars: '{content[:50]}...'): {e}")
+            logger.error(f"Error embedding data: {e}", exc_info=True)
+            return False
 
     def embed_one_piece_data(self):
-        """Fetches and embeds One Piece data (sagas, characters, fruits)."""
-        logging.debug("DataEmbeddingService: Starting One Piece data embedding...")
-
-        # Embed Sagas
-        sagas_data = self.one_piece_api_service.get_all_sagas()
-        if sagas_data:
-            for saga in sagas_data:
-                content = f"One Piece Saga: {saga.get('title')}. Number of arcs: {saga.get('number_of_arcs')}."
-                metadata = {"source": "one_piece_saga", "title": saga.get('title'), "id": saga.get('id')}
-                self.embed_text_data(content, metadata)
-            logging.info(f"DataEmbeddingService: Embedded {len(sagas_data)} One Piece sagas.")
-        else:
-            logging.warning("DataEmbeddingService: Failed to retrieve One Piece sagas or no sagas found.")
-
-        # Embed Characters
-        characters_data = self.one_piece_api_service.get_all_characters()
-        if characters_data:
-            for char in characters_data:
-                content = f"One Piece Character: {char.get('name')}. Gender: {char.get('gender')}. Status: {char.get('status')}."
-                metadata = {"source": "one_piece_character", "name": char.get('name'), "id": char.get('id')}
-                self.embed_text_data(content, metadata)
-            logging.info(f"DataEmbeddingService: Embedded {len(characters_data)} One Piece characters.")
-        else:
-            logging.warning("DataEmbeddingService: Failed to retrieve One Piece characters or no characters found.")
-
-        # Embed Fruits (Devil Fruits)
-        fruits_data = self.one_piece_api_service.get_all_fruits()
-        if fruits_data:
-            for fruit in fruits_data:
-                content = f"One Piece Devil Fruit: {fruit.get('name')}. Type: {fruit.get('type')}. Description: {fruit.get('description')}."
-                metadata = {"source": "one_piece_fruit", "name": fruit.get('name'), "id": fruit.get('id')}
-                self.embed_text_data(content, metadata)
-            logging.info(f"DataEmbeddingService: Embedded {len(fruits_data)} One Piece fruits.")
-        else:
-            logging.warning("DataEmbeddingService: Failed to retrieve One Piece fruits or no fruits found.")
-
-        logging.debug("DataEmbeddingService: Finished One Piece data embedding.")
-
-
-    def embed_ann_data(self, limit: int = 20):
-        """
-        Fetches and embeds recent items from the Anime News Network (ANN) API.
-        This uses the NewsController to get structured data.
-        """
-        logging.debug(f"DataEmbeddingService: Starting ANN summary data embedding (limit={limit})...")
-        # NewsController's get_recent_news_articles already handles XML parsing and returns data, status
-        articles_data, status_code = self.news_controller.get_recent_news_articles(limit=limit)
-
-        if status_code == 200 and articles_data:
-            for article in articles_data:
-                item_id = article.get('id')
-                item_type = article.get('type')
-                item_name = article.get('name')
-                item_precision = article.get('precision')
-
-                # Construct content for embedding. Prioritize 'name' and 'type'.
-                content = f"Anime News Network: Type: {item_type}, Name: {item_name}, Precision: {item_precision}."
-                metadata = {
-                    "source": "ann_recent_item_summary",
-                    "id": item_id,
-                    "type": item_type,
-                    "name": item_name,
-                    "precision": item_precision,
-                }
-                self.embed_text_data(content, metadata)
-            logging.info(f"DataEmbeddingService: Embedded {len(articles_data)} ANN recent item summaries.")
-        else:
-            if status_code == 200:
-                logging.info("DataEmbeddingService: ANN summary data retrieval successful, but no recent items were found.")
-            else:
-                error_message = articles_data.get('error', 'Unknown error content') if isinstance(articles_data, dict) else 'Non-dict error response from NewsController'
-                logging.warning(f"DataEmbeddingService: Failed to retrieve ANN summary data. Status code: {status_code}, Error: {error_message}")
-
-        logging.debug("DataEmbeddingService: Finished ANN summary data embedding.")
-
-    def embed_ann_details_data(self, limit: int = 100) -> Tuple[int, int]:
-        """
-        Fetches detailed ANN encyclopedia data (anime/manga) and embeds it.
-        This performs a two-step process: get recent IDs, then fetch details for each.
-        Includes a delay to respect API rate limits.
-        Returns: (processed_count, failed_count)
-        """
-        logging.info(f"DataEmbeddingService: Starting ANN detailed data embedding for {limit} recent items...")
+        logger.info("DataEmbeddingService: Starting One Piece data embedding...")
         processed_count = 0
         failed_count = 0
-
-        # Step 1: Get a list of recent encyclopedia items (anime/manga types)
-        recent_items, status_code = self.news_controller.get_recent_news_articles(limit=limit)
-
-        if status_code != 200 or not recent_items:
-            logging.error(f"DataEmbeddingService: Failed to get recent ANN items. Status: {status_code}, Data: {recent_items}")
-            # If the initial fetch fails, consider all requested items as failed for the purpose of the return count
-            return processed_count, limit
-
-        logging.info(f"DataEmbeddingService: Retrieved {len(recent_items)} recent ANN items for detailed processing.")
-
-        for i, item_summary in enumerate(recent_items):
-            item_id = item_summary.get('id')
-            item_name = item_summary.get('name')
-            item_type = item_summary.get('type') # e.g., 'anime', 'manga', 'TV', 'OAV'
-
-            if not item_id:
-                logging.warning(f"DataEmbeddingService: Skipping item due to missing ID: {item_summary}")
-                failed_count += 1
-                continue
-
-            # Respect ANN API rate limits (0.5 seconds between requests)
-            if i > 0: # Don't sleep before the very first request
-                time.sleep(0.5)
-
-            # Step 2: Fetch detailed information for each item
-            details, details_status_code = self.news_controller.get_ann_title_details(int(item_id))
-
-            if details_status_code == 200 and details:
-                # Construct comprehensive content for embedding
-                content_parts = []
-                content_parts.append(f"Title: {details.get('main_title', item_name)}")
-                content_parts.append(f"Type: {details.get('type', item_type)}")
-                if details.get('episodes') is not None:
-                    content_parts.append(f"Episodes: {details.get('episodes')}")
-                if details.get('vintage'):
-                    content_parts.append(f"Aired/Released: {details.get('vintage')}")
-                if details.get('genres'):
-                    content_parts.append(f"Genres: {', '.join(details.get('genres'))}")
-                if details.get('themes'):
-                    content_parts.append(f"Themes: {', '.join(details.get('themes'))}")
-                if details.get('alternative_titles'):
-                    content_parts.append(f"Alternative Titles: {', '.join(details.get('alternative_titles'))}")
-                if details.get('description'): # This is the 'Plot Summary'
-                    content_parts.append(f"Description: {details.get('description')}")
-                if details.get('staff'):
-                    staff_info = [f"{s.get('person')} ({s.get('task')})" for s in details.get('staff')]
-                    content_parts.append(f"Staff: {', '.join(staff_info)}")
-                if details.get('related_titles'):
-                    related_info = [f"{r.get('name', r.get('id'))} ({r.get('relation')})" for r in details.get('related_titles')]
-                    content_parts.append(f"Related: {', '.join(related_info)}")
-
-
-                full_content = ". ".join([p for p in content_parts if p]) # Join with period for better readability/embedding
-
-                # Create metadata for the vector store
-                metadata = {
-                    "source": "ann_details",
-                    "id": details.get('id'),
-                    "main_title": details.get('main_title'),
-                    "type": details.get('type'),
-                    "genres": details.get('genres'),
-                    "vintage": details.get('vintage'),
-                    "episodes": details.get('episodes')
-                    # Do NOT include the full description in metadata to avoid redundancy and large object sizes
-                }
-                self.embed_text_data(full_content, metadata)
-                processed_count += 1
+        try:
+            # Fetch all characters - CORRECTED METHOD NAME
+            characters_data, status_code = self.one_piece_api_service.get_characters()
+            if status_code == 200 and characters_data:
+                for char in characters_data:
+                    character_id = char.get('id')
+                    character_name = char.get('name')
+                    description = char.get('description', '')
+                    if character_name and character_id and description:
+                        content = f"Character: {character_name}. Description: {description}"
+                        metadata = {
+                            "source": "One Piece API",
+                            "type": "character",
+                            "name": character_name,
+                            "op_id": character_id
+                        }
+                        if self.embed_text_data(content, metadata, f"one_piece_char_{character_id}"):
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        logger.warning(f"Skipping One Piece character due to missing data: {char.get('name')} (ID: {char.get('id')})")
+                        failed_count += 1
             else:
-                logging.warning(f"DataEmbeddingService: Failed to get details for ANN item ID {item_id}. Status: {details_status_code}, Error: {details.get('error', 'Unknown error')}")
-                failed_count += 1
+                logger.error(f"Failed to fetch One Piece characters: Status {status_code}, Data: {characters_data}")
+                # If API call fails, consider all potential items as failed for reporting
+                failed_count += (len(characters_data) if characters_data else 0)
 
-        logging.info(f"DataEmbeddingService: Finished ANN detailed data embedding. Processed {processed_count}, Failed {failed_count}.")
-        return processed_count, failed_count
-
-    def embed_aniwatch_data(self, limit: int = 100, page_limit: int = 5) -> Tuple[int, int]:
-        """
-        Fetches detailed Aniwatch anime data and embeds it into the vector store.
-        This performs a two-step process: get A-Z list (for IDs), then fetch about info for each.
-        Includes a delay to respect API rate limits.
-        Returns: (processed_count, failed_count)
-        """
-        logging.info(f"DataEmbeddingService: Starting Aniwatch detailed data embedding for {limit} items (across {page_limit} pages)...")
-        processed_count = 0
-        failed_count = 0
-        total_items_to_process = 0
-
-        # Aniwatch API's A-Z list has sort options; we'll fetch from 'all'
-        # Iterate through pages to get a sufficient number of anime IDs
-        all_anime_ids = []
-        for page_num in range(1, page_limit + 1):
-            aniwatch_list_data, status_code = self.aniwatch_controller.get_aniwatch_az_list_data(
-                sort_option="all", page=page_num
-            )
-            if status_code != 200 or not aniwatch_list_data or not aniwatch_list_data.get("animes"):
-                logging.warning(f"DataEmbeddingService: Failed to get Aniwatch A-Z list page {page_num}. Status: {status_code}, Data: {aniwatch_list_data}")
-                break # Stop if a page fails or no more anime
-
-            for anime_summary in aniwatch_list_data["animes"]:
-                if anime_summary.get("id"):
-                    all_anime_ids.append(anime_summary["id"])
-                    if len(all_anime_ids) >= limit:
-                        break # Stop collecting IDs if limit is reached
-
-            if len(all_anime_ids) >= limit or not aniwatch_list_data.get("hasNextPage"):
-                break # Stop if limit is reached or no more pages
-
-            time.sleep(0.2) # Small delay between page fetches
-
-        total_items_to_process = min(limit, len(all_anime_ids))
-        logging.info(f"DataEmbeddingService: Collected {total_items_to_process} Aniwatch anime IDs for detailed processing.")
-
-        for i, anime_id in enumerate(all_anime_ids[:limit]): # Process up to the specified limit
-            if i > 0:
-                time.sleep(0.5) # Delay between individual detail fetches to respect API limits
-
-            details, details_status_code = self.aniwatch_controller.get_aniwatch_anime_details_data(anime_id)
-
-            if details_status_code == 200 and details:
-                content_parts = []
-                content_parts.append(f"Title: {details.get('name')}")
-                if details.get('japanese_name'):
-                    content_parts.append(f"Japanese Title: {details.get('japanese_name')}")
-                content_parts.append(f"Type: {details.get('type')}")
-                if details.get('synopsis'):
-                    content_parts.append(f"Synopsis: {details.get('synopsis')}")
-                if details.get('genres'):
-                    content_parts.append(f"Genres: {', '.join(details.get('genres'))}")
-                if details.get('aired'):
-                    content_parts.append(f"Aired: {details.get('aired')}")
-                if details.get('status'):
-                    content_parts.append(f"Status: {details.get('status')}")
-                if details.get('studios'):
-                    content_parts.append(f"Studios: {', '.join(details.get('studios'))}")
-                if details.get('total_episodes') is not None:
-                    content_parts.append(f"Total Episodes: {details.get('total_episodes')}")
-                if details.get('duration'):
-                    content_parts.append(f"Duration: {details.get('duration')}")
-                if details.get('rating'):
-                    content_parts.append(f"Rating: {details.get('rating')}")
-                if details.get('score') is not None:
-                    content_parts.append(f"Score: {details.get('score')}")
-                if details.get('producers'):
-                    content_parts.append(f"Producers: {', '.join(details.get('producers'))}")
-                if details.get('relations'):
-                    relation_info = [f"{r.get('name', r.get('id'))} ({r.get('type')})" for r in details.get('relations')]
-                    content_parts.append(f"Relations: {', '.join(relation_info)}")
-                if details.get('recommendations'):
-                    rec_info = [f"{r.get('name', r.get('id'))} (Recommended)" for r in details.get('recommendations')]
-                    content_parts.append(f"Recommendations: {', '.join(rec_info)}")
-
-
-                full_content = ". ".join([p for p in content_parts if p])
-
-                metadata = {
-                    "source": "aniwatch_details",
-                    "id": details.get('id'),
-                    "name": details.get('name'),
-                    "type": details.get('type'),
-                    "genres": details.get('genres'),
-                    "aired": details.get('aired'),
-                    "total_episodes": details.get('total_episodes'),
-                    "rating": details.get('rating'),
-                    "score": details.get('score')
-                    # Synopsis is part of content, not metadata to avoid large metadata
-                }
-                self.embed_text_data(full_content, metadata)
-                processed_count += 1
+            # Fetch all devil fruits - CORRECTED METHOD NAME
+            devil_fruits_data, status_code = self.one_piece_api_service.get_devil_fruits()
+            if status_code == 200 and devil_fruits_data:
+                for df in devil_fruits_data:
+                    df_id = df.get('id')
+                    df_name = df.get('name')
+                    description = df.get('description', '')
+                    ability = df.get('ability', '')
+                    if df_name and df_id and (description or ability):
+                        content = f"Devil Fruit: {df_name}. Description: {description}. Ability: {ability}"
+                        metadata = {
+                            "source": "One Piece API",
+                            "type": "devil_fruit",
+                            "name": df_name,
+                            "op_id": df_id
+                        }
+                        if self.embed_text_data(content, metadata, f"one_piece_df_{df_id}"):
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        logger.warning(f"Skipping One Piece Devil Fruit due to missing data: {df.get('name')} (ID: {df.get('id')})")
+                        failed_count += 1
             else:
-                logging.warning(f"DataEmbeddingService: Failed to get details for Aniwatch anime ID {anime_id}. Status: {details_status_code}, Error: {details.get('error', 'Unknown error')}")
-                failed_count += 1
+                logger.error(f"Failed to fetch One Piece devil fruits: Status {status_code}, Data: {devil_fruits_data}")
+                failed_count += (len(devil_fruits_data) if devil_fruits_data else 0)
 
-        logging.info(f"DataEmbeddingService: Finished Aniwatch detailed data embedding. Processed {processed_count}, Failed {failed_count}.")
-        return processed_count, failed_count
+            # Fetch all crews - CORRECTED METHOD NAME
+            crews_data, status_code = self.one_piece_api_service.get_crews()
+            if status_code == 200 and crews_data:
+                for crew in crews_data:
+                    crew_id = crew.get('id')
+                    crew_name = crew.get('name')
+                    description = crew.get('description', '')
+                    if crew_name and crew_id and description:
+                        content = f"Crew: {crew_name}. Description: {description}"
+                        metadata = {
+                            "source": "One Piece API",
+                            "type": "crew",
+                            "name": crew_name,
+                            "op_id": crew_id
+                        }
+                        if self.embed_text_data(content, metadata, f"one_piece_crew_{crew_id}"):
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        logger.warning(f"Skipping One Piece crew due to missing data: {crew.get('name')} (ID: {crew.get('id')})")
+                        failed_count += 1
+            else:
+                logger.error(f"Failed to fetch One Piece crews: Status {status_code}, Data: {crews_data}")
+                failed_count += (len(crews_data) if crews_data else 0)
+
+            # Fetch all islands - CORRECTED METHOD NAME
+            islands_data, status_code = self.one_piece_api_service.get_islands()
+            if status_code == 200 and islands_data:
+                for island in islands_data:
+                    island_id = island.get('id')
+                    island_name = island.get('name')
+                    description = island.get('description', '')
+                    if island_name and island_id and description:
+                        content = f"Island: {island_name}. Description: {description}"
+                        metadata = {
+                            "source": "One Piece API",
+                            "type": "island",
+                            "name": island_name,
+                            "op_id": island_id
+                        }
+                        if self.embed_text_data(content, metadata, f"one_piece_island_{island_id}"):
+                            processed_count += 1
+                        else:
+                            failed_count += 1
+                    else:
+                        logger.warning(f"Skipping One Piece island due to missing data: {island.get('name')} (ID: {island.get('id')})")
+                        failed_count += 1
+            else:
+                logger.error(f"Failed to fetch One Piece islands: Status {status_code}, Data: {islands_data}")
+                failed_count += (len(islands_data) if islands_data else 0)
+
+        except Exception as e:
+            logger.error(f"DataEmbeddingService: Error during One Piece data embedding: {e}", exc_info=True)
+            # Cannot determine exact count if a broad error occurs, log and reset
+            processed_count = 0
+            failed_count = 0
+        finally:
+            logger.info(f"DataEmbeddingService: Finished One Piece data embedding. Processed {processed_count} items, Failed: {failed_count}.")
+
+    def embed_ann_details_data(self, limit: int = 100):
+        """
+        Fetches recent ANN encyclopedia articles (reports) and embeds their details.
+        """
+        logger.info(f"DataEmbeddingService: Starting ANN data embedding with limit={limit}...")
+        processed_total = 0
+        failed_total = 0
+        try:
+            # CORRECTED: Call the right method and expect a list of dictionaries
+            ann_articles, status_code = self.news_controller.get_recent_news_articles(limit=limit)
+
+            if status_code == 200 and isinstance(ann_articles, list) and ann_articles:
+                for article in ann_articles:
+                    item_id = article.get('id')
+                    item_type = article.get('type', 'news_item') # Default type
+
+                    # Make content generation more robust for ANN items
+                    content = article.get('title', '') # Primary source of text
+                    if not content: # Fallback if 'title' is empty
+                        content = f"{article.get('type', 'Item')} (ID: {item_id or 'N/A'})"
+                        if article.get('name'): # Use 'name' if 'title' is empty and 'name' exists
+                             content = article.get('name')
+                        if article.get('vintage'):
+                            content += f" from {article['vintage']}"
+
+                    if content and item_id is not None: # Ensure content is not empty and ID exists
+                        metadata = {
+                            "source": "ANN News",
+                            "ann_id": item_id,
+                            "type": item_type,
+                            "title": article.get('title'),
+                            "url": article.get('url'),
+                            "release_date": article.get('date'),
+                            "creator": article.get('creator'),
+                            "thumbnail": article.get('thumbnail')
+                        }
+                        if self.embed_text_data(content, metadata, f"ann_{item_id}"):
+                            processed_total += 1
+                        else:
+                            failed_total += 1
+                    else:
+                        logger.warning(f"DataEmbeddingService: Skipping ANN item due to missing content or ID: {article.get('title', 'N/A')} (ID: {item_id})")
+                        failed_total += 1
+            elif status_code != 200:
+                logger.error(f"DataEmbeddingService: Failed to fetch ANN news articles. Status: {status_code}, Error: {ann_articles.get('error', 'Unknown error')}")
+                failed_total += limit # Account for all potential failures if API call itself failed
+            else:
+                logger.info("DataEmbeddingService: No ANN news articles returned or data format incorrect.")
+        except Exception as e:
+            logger.error(f"DataEmbeddingService: Error during ANN data embedding: {e}", exc_info=True)
+            failed_total += limit # Assume all failed if a general exception occurs
+        finally:
+            logger.info(f"DataEmbeddingService: Finished ANN data embedding. Processed {processed_total} items, Failed: {failed_total}.")
+
+    def embed_aniwatch_data(self, limit: int = 100, page_limit: int = 5):
+        """
+        Fetches recent Aniwatch (streaming site) data and embeds it.
+        This focuses on popular recent anime from Aniwatch.
+        """
+        logger.info(f"DataEmbeddingService: Starting Aniwatch data embedding with limit={limit}, page_limit={page_limit}...")
+        processed_total = 0
+        failed_total = 0
+        try:
+            # AniwatchController.get_recent_episodes returns a tuple (data, status_code)
+            # data is expected to be a list of episode dictionaries
+            recent_episodes_data, status_code = self.aniwatch_controller.get_recent_episodes(limit=limit, page_limit=page_limit)
+
+            if status_code == 200 and isinstance(recent_episodes_data, list) and recent_episodes_data:
+                for episode in recent_episodes_data:
+                    anime_id = episode.get('animeId')
+                    episode_number = episode.get('episodeNum')
+                    title = episode.get('animeTitle', 'No Title')
+                    type_ = episode.get('type', 'Episode')
+
+                    content = f"{type_}: {title} Episode {episode_number}. {episode.get('synopsis', '')}"
+                    source_item_id = f"aniwatch_episode_{anime_id}_{episode_number}"
+
+                    if content and anime_id and episode_number:
+                        metadata = {
+                            "source": "Aniwatch",
+                            "type": type_,
+                            "aniwatch_anime_id": anime_id,
+                            "episode_number": episode_number,
+                            "title": title,
+                            "release_date": episode.get('releasedDate')
+                        }
+                        if self.embed_text_data(content, metadata, source_item_id):
+                            processed_total += 1
+                        else:
+                            failed_total += 1
+                    else:
+                        logger.warning(f"DataEmbeddingService: Skipping Aniwatch episode due to missing content or ID: {title} (ID: {anime_id})")
+                        failed_total += 1
+            elif status_code != 200:
+                logger.error(f"DataEmbeddingService: Failed to fetch Aniwatch data. Status: {status_code}, Error: {recent_episodes_data.get('error', 'Unknown error')}")
+                failed_total += (limit * page_limit) # Account for all potential failures if API call itself failed
+            else:
+                logger.info("DataEmbeddingService: No Aniwatch data returned or data format incorrect.")
+        except Exception as e:
+            logger.error(f"DataEmbeddingService: Error during Aniwatch data embedding: {e}", exc_info=True)
+            failed_total += (limit * page_limit) # Assume all failed if a general exception occurs
+        finally:
+            logger.info(f"DataEmbeddingService: Finished Aniwatch data embedding. Processed {processed_total} items, Failed: {failed_total}.")
+
+
+    def embed_anime_api_data(self, limit: int = 100):
+        """
+        Fetches and embeds general anime data (top ten, top search, spotlights, trending)
+        from the new Node.js anime-api.
+        """
+        logger.info(f"DataEmbeddingService: Starting Anime API general data embedding with limit={limit}...")
+        processed_total = 0
+        failed_total = 0
+        try:
+            # Home page data (spotlights, trending)
+            home_data, status_code = self.anime_api_service.get_home_info()
+            if status_code == 200 and home_data and home_data.get('success') and 'results' in home_data:
+                # Iterate through expected lists within 'results'
+                for section_name in ['spotlights', 'trending', 'topAiring', 'mostPopular', 'mostFavorite', 'latestCompleted', 'latestEpisode']:
+                    for item in home_data['results'].get(section_name, []):
+                        anime_id = item.get('id')
+                        title = item.get('title')
+                        synopsis = item.get('description', '') # Use 'description' from API response as synopsis
+
+                        content = f"Anime ({section_name}): {title}. Synopsis: {synopsis}"
+                        if content and anime_id:
+                            metadata = {
+                                "source": "Anime API",
+                                "type": f"home_page_anime_{section_name}",
+                                "anime_id": anime_id,
+                                "title": title,
+                                "section": section_name
+                            }
+                            if self.embed_text_data(content, metadata, f"anime_api_home_{section_name}_{anime_id}"):
+                                processed_total += 1
+                            else:
+                                failed_total += 1
+                        else:
+                            logger.warning(f"DataEmbeddingService: Skipping Anime API home item ({section_name}) due to missing content or ID: {title} (ID: {anime_id})")
+                            failed_total += 1
+            else:
+                logger.error(f"DataEmbeddingService: Failed to fetch Anime API home data: Status {status_code}, Data: {home_data}")
+                failed_total += limit # Estimate failure count
+
+            # Top Ten Anime
+            top_ten_data, status_code = self.anime_api_service.get_top_ten_anime()
+            if status_code == 200 and top_ten_data and top_ten_data.get('success') and 'results' in top_ten_data and 'topTen' in top_ten_data['results']:
+                # Top Ten has nested 'today', 'week', 'month' lists
+                for period in ['today', 'week', 'month']:
+                    for item in top_ten_data['results']['topTen'].get(period, []):
+                        anime_id = item.get('id')
+                        title = item.get('name') # Top Ten uses 'name' instead of 'title'
+                        # No direct synopsis in Top Ten items, use name/type
+                        content = f"Top 10 Anime ({period}): {title} (Type: {item.get('showType', 'N/A')})"
+                        if content and anime_id:
+                            metadata = {
+                                "source": "Anime API",
+                                "type": f"top_ten_anime_{period}",
+                                "anime_id": anime_id,
+                                "title": title,
+                                "period": period
+                            }
+                            if self.embed_text_data(content, metadata, f"anime_api_topten_{period}_{anime_id}"):
+                                processed_total += 1
+                            else:
+                                failed_total += 1
+                        else:
+                            logger.warning(f"DataEmbeddingService: Skipping Anime API top ten item ({period}) due to missing content or ID: {title} (ID: {anime_id})")
+                            failed_total += 1
+            else:
+                logger.error(f"DataEmbeddingService: Failed to fetch Anime API top ten data: Status {status_code}, Data: {top_ten_data}")
+                failed_total += limit # Estimate failure count
+
+            # Top Search Anime
+            top_search_data, status_code = self.anime_api_service.get_top_search_anime(limit=limit)
+            if status_code == 200 and top_search_data and top_search_data.get('success') and 'results' in top_search_data:
+                for item in top_search_data['results']: # 'results' is directly a list of items here
+                    anime_id = item.get('id')
+                    title = item.get('title')
+                    synopsis = item.get('description', '') # Use 'description' from API response as synopsis
+                    content = f"Top Search Anime: {title}. Synopsis: {synopsis}"
+                    if content and anime_id:
+                        metadata = {
+                            "source": "Anime API",
+                            "type": "top_search_anime",
+                            "anime_id": anime_id,
+                            "title": title
+                        }
+                        if self.embed_text_data(content, metadata, f"anime_api_topsearch_{anime_id}"):
+                            processed_total += 1
+                        else:
+                            failed_total += 1
+                    else:
+                        logger.warning(f"DataEmbeddingService: Skipping Anime API top search item due to missing content or ID: {title} (ID: {anime_id})")
+                        failed_total += 1
+            else:
+                logger.error(f"DataEmbeddingService: Failed to fetch Anime API top search data: Status {status_code}, Data: {top_search_data}")
+                failed_total += limit # Estimate failure count
+
+        except Exception as e:
+            logger.error(f"DataEmbeddingService: Error during Anime API general data embedding: {e}", exc_info=True)
+            processed_total = 0 # Reset counts on broad error
+            failed_total = 0
+        finally:
+            logger.info(f"DataEmbeddingService: Finished Anime API general data embedding. Processed {processed_total} items, Failed: {failed_total}.")
+
+
+    def embed_anime_api_category_data(self, categories: List[str], limit_per_category: int = 50):
+        """
+        Fetches and embeds anime data for specific categories from the Node.js anime-api.
+        """
+        logger.info(f"DataEmbeddingService: Starting Anime API category data embedding for categories: {categories} with limit_per_category={limit_per_category}...")
+        processed_total = 0
+        failed_total = 0
+
+        for category in categories:
+            logger.debug(f"DataEmbeddingService: Fetching data for category: {category}")
+            try:
+                # Assuming get_anime_by_category returns a dictionary with 'results' key
+                category_data, status_code = self.anime_api_service.get_anime_by_category(category, limit=limit_per_category)
+
+                if status_code == 200 and category_data and category_data.get('success') and 'results' in category_data:
+                    # CORRECTED: Iterate over 'data' list within 'results'
+                    for item in category_data['results'].get('data', []):
+                        anime_id = item.get('id')
+                        title = item.get('title')
+                        synopsis = item.get('description', '') # Use 'description' from API response as synopsis
+
+                        content = f"Anime in category '{category}': {title}. Synopsis: {synopsis}"
+                        if content and anime_id:
+                            metadata = {
+                                "source": "Anime API",
+                                "type": "category_anime",
+                                "anime_id": anime_id,
+                                "title": title,
+                                "category": category
+                            }
+                            if self.embed_text_data(content, metadata, f"anime_api_category_{category}_{anime_id}"):
+                                processed_total += 1
+                            else:
+                                failed_total += 1
+                        else:
+                            logger.warning(f"DataEmbeddingService: Skipping Anime API category item due to missing content or ID: {title} (ID: {anime_id})")
+                            failed_total += 1
+                elif status_code != 200:
+                    logger.error(f"DataEmbeddingService: Failed to fetch Anime API category '{category}' data. Status: {status_code}, Error: {category_data.get('error', 'Unknown error')}")
+                    failed_total += limit_per_category # Estimate failures
+                else:
+                    logger.info(f"DataEmbeddingService: No data returned for Anime API category: {category}")
+            except Exception as e:
+                logger.error(f"DataEmbeddingService: Error fetching/embedding data for category '{category}': {e}", exc_info=True)
+                failed_total += limit_per_category # Estimate failures
+
+        logger.info(f"DataEmbeddingService: Finished Anime API category data embedding. Processed {processed_total}, Failed: {failed_total}.")
+        return processed_total, failed_total
 
 
     def embed_all_data(self):
         """Orchestrates the embedding of data from all configured sources."""
-        logging.debug("DataEmbeddingService: Starting embedding of all data...")
-        # Clear existing documents in the vector store before re-embedding,
-        # especially important for in-memory store in development to prevent duplicates
-        self.vector_store.documents = []
-        logging.info("VectorStore: Cleared existing documents for fresh embedding.")
+        logger.debug("DataEmbeddingService: Starting embedding of all data...")
+
+        # VectorStore's load method handles persistence, new data will be appended
+        logger.info("VectorStore: Existing documents retained. Appending new data.")
 
         self.embed_one_piece_data()
-        self.embed_ann_details_data(limit=100) # Call the new detailed embedding method
-        self.embed_aniwatch_data(limit=100, page_limit=5) # Call the new Aniwatch embedding method
-        logging.debug("DataEmbeddingService: All data embedding complete.")
+        # This now calls the correctly named method and handles its output
+        self.embed_ann_details_data(limit=100)
+        # Ignoring Aniwatch as per your instruction
+        # self.embed_aniwatch_data(limit=100, page_limit=5)
+        self.embed_anime_api_data(limit=100)
 
+        common_categories = [\
+            "top-airing", "most-popular", "completed", "movie", "tv",
+            "genre/action", "genre/comedy", "producer/ufotable", "genre/fantasy", "genre/adventure",
+            "genre/sci-fi", "genre/drama", "genre/slice-of-life", "genre/thriller",
+            "genre/supernatural", "genre/romance", "genre/mystery"
+        ]
+        self.embed_anime_api_category_data(categories=common_categories, limit_per_category=50)
+
+        # After embedding, save the updated vector store
+        self.vector_store.save()
+        logger.info("DataEmbeddingService: All data embedding complete. Vector store saved.")

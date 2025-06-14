@@ -1,6 +1,6 @@
 # backend/routes/llm_api_routes.py
 from flask import Blueprint, jsonify, request
-from controllers.llm_controller import LLMController # Import our new LLMController
+from controllers.llm_controller import LLMController # Import our LLMController
 
 # Create a Blueprint for LLM-related API routes
 # All routes defined in this blueprint will be prefixed with '/api/llm'
@@ -11,8 +11,6 @@ def chat_with_llm():
     """
     API endpoint for sending user queries to the configured LLM (Mushi).
     Expects a JSON body with a 'query' field.
-    Example: POST /api/llm/chat
-    Request Body: {"query": "Tell me about Monkey D. Luffy."}
     """
     data = request.get_json()
     user_query = data.get('query')
@@ -28,5 +26,48 @@ def chat_with_llm():
     else:
         return jsonify({"error": llm_response}), status_code
 
-# You can add more LLM-related endpoints here if needed in the future
-# e.g., for different LLM tasks like summarization, specific lore extraction, etc.
+@llm_api_bp.route('/providers', methods=['GET'])
+def get_llm_providers_route():
+    """
+    API endpoint to get the list of available LLM providers.
+    """
+    # Calls a static method from LLMController to get the list
+    return jsonify(LLMController.get_llm_providers()), 200
+
+@llm_api_bp.route('/set-provider', methods=['POST'])
+def set_llm_provider_route():
+    """
+    API endpoint to set the active LLM provider.
+    Expects a JSON body with a 'provider' field.
+    """
+    data = request.get_json()
+    provider_key = data.get('provider')
+
+    # Calls a static method from LLMController to handle the logic
+    message, status_code = LLMController.set_llm_provider(provider_key)
+    return jsonify({"message": message}) if status_code == 200 else jsonify({"error": message}), status_code
+
+@llm_api_bp.route('/current_provider', methods=['GET'])
+def get_current_llm_provider_route():
+    """
+    API endpoint to get the currently selected LLM provider.
+    This is called by the frontend's ProviderSelector on load.
+    """
+    # Calls a static method from LLMController
+    current_provider_data, status_code = LLMController.get_current_llm_provider()
+    return jsonify(current_provider_data), status_code
+
+@llm_api_bp.route('/suggest-questions', methods=['POST'])
+def suggest_questions_route():
+    """
+    API endpoint to get suggested follow-up questions from the LLM.
+    Expects a JSON body with a 'content' field (the last LLM response).
+    """
+    data = request.get_json()
+    last_response_text = data.get('content')
+
+    if not last_response_text:
+        return jsonify({"error": "Missing 'content' field in request body."}), 400
+
+    suggested_data, status_code = LLMController.suggest_followup_questions(last_response_text)
+    return jsonify(suggested_data), status_code

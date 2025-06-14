@@ -4,9 +4,11 @@
 @tailwind utilities;
 
 /* You can add your custom global styles below these directives */
-body {
+html, body, #root {
   font-family: 'Inter', sans-serif; /* Using Inter as a default, adjust if needed */
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  height: 100%;
+  width: 100%;
 }
