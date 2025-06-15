@@ -24,6 +24,9 @@ class Config:
     # Set the default Ollama model for the OllamaLLMService to use
     # This will be the anime model you want as the primary
     OLLAMA_DEFAULT_GENERATION_MODEL = OLLAMA_ANIME_MODEL_NAME
+    # Timeout for Ollama LLM generation in seconds
+    OLLAMA_GEN_TIMEOUT = int(os.getenv("OLLAMA_GENERATION_TIMEOUT", 120))
+
 
     # AnimeNewsNetwork API (no auth needed, just base URL)
     ANN_API_BASE_URL = "https://www.animenewsnetwork.com/encyclopedia/api.php"
@@ -63,3 +66,4 @@ class Config:
     # --- Scheduler Configuration ---
     # Interval in minutes for how often the data embedding service should update
     EMBEDDING_UPDATE_INTERVAL_MINUTES = int(os.getenv("EMBEDDING_UPDATE_INTERVAL_MINUTES", 1440)) # Default to 24 hours
+

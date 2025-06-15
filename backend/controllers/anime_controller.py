@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 from services.anime_api_service import AnimeAPIService
 import logging
+import re # Import regex for parsing data_id from episode id
 
 logger = logging.getLogger(__name__)
 
@@ -35,681 +36,267 @@ class AnimeController:
         formatted_home_data = {
             "spotlights": self._format_anime_list_home(results.get("spotlights", [])),
             "trending": self._format_anime_list_home(results.get("trending", [])),
-            "today_schedule": self._format_schedule_list(results.get("today", {}).get("schedule", [])),
-            "top_airing": self._format_anime_list_home(results.get("topAiring", [])),
-            "most_popular": self._format_anime_list_home(results.get("mostPopular", [])),
-            "most_favorite": self._format_anime_list_home(results.get("mostFavorite", [])),
-            "latest_completed": self._format_anime_list_home(results.get("latestCompleted", [])),
-            "latest_episode": self._format_anime_list_home(results.get("latestEpisode", [])),
-            "genres": results.get("genres", []),
+            "today_schedule": self._format_anime_list_home(results.get("today_schedule", [])),
+            "top_airing": self._format_anime_list_home(results.get("top_airing", [])),
+            "most_popular": self._format_anime_list_home(results.get("most_popular", [])),
+            "most_favorite": self._format_anime_list_home(results.get("most_favorite", [])),
+            "latest_completed": self._format_anime_list_home(results.get("latest_completed", [])),
+            "latest_episode": self._format_anime_list_home(results.get("latest_episode", [])),
+            "genres": results.get("genres", []) # Genres might be simple strings, no extra formatting needed initially
         }
-
-        logger.debug("AnimeController: Successfully formatted home page data.")
         return formatted_home_data, 200
 
     def get_top_ten_anime_data(self) -> tuple[dict, int]:
         """
-        Fetches and formats top 10 anime data from the 'anime-api'.
+        Fetches and formats top 10 anime data.
         """
         logger.debug("AnimeController: Fetching top ten anime data.")
-        raw_data, status_code = self.anime_api_service.get_top_ten_info()
+        raw_data, status_code = self.anime_api_service.get_top_ten_anime()
+        if status_code != 200:
+            return raw_data, status_code
+        return {"top_ten_anime": self._format_anime_list_common(raw_data.get("results", []))}, 200
 
+    def search_anime_data(self, query: str, page: int = 1) -> tuple[dict, int]:
+        """
+        Searches for anime based on a query and formats the results.
+        """
+        logger.debug(f"AnimeController: Searching anime for query: {query}, page: {page}")
+        raw_data, status_code = self.anime_api_service.search_anime(query, page)
         if status_code != 200:
             return raw_data, status_code
 
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data or 'topTen' not in raw_data['results']:
-            logger.error("AnimeController: Invalid or missing 'results.topTen' in top ten data.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        top_ten_results = raw_data['results']['topTen']
-        formatted_top_ten_data = {
-            "today": self._format_anime_list_top_ten(top_ten_results.get("today", [])),
-            "week": self._format_anime_list_top_ten(top_ten_results.get("week", [])),
-            "month": self._format_anime_list_top_ten(top_ten_results.get("month", [])),
+        formatted_results = {
+            "results": self._format_anime_list_common(raw_data.get("results", [])),
+            "total_pages": raw_data.get("total_pages", 1)
         }
-        logger.debug("AnimeController: Successfully formatted top ten anime data.")
-        return formatted_top_ten_data, 200
+        return formatted_results, 200
 
-    def get_top_search_data(self) -> tuple[dict, int]:
+    def get_anime_by_category_data(self, category: str, page: int = 1) -> tuple[dict, int]:
         """
-        Fetches and formats top search data from the 'anime-api'.
+        Fetches and formats anime by category.
         """
-        logger.debug("AnimeController: Fetching top search data.")
-        raw_data, status_code = self.anime_api_service.get_top_search_info()
-
+        logger.debug(f"AnimeController: Fetching anime by category: {category}, page: {page}")
+        raw_data, status_code = self.anime_api_service.get_anime_by_category(category, page)
         if status_code != 200:
             return raw_data, status_code
 
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error("AnimeController: Invalid or missing 'results' in top search data.")
-            return {"error": "Invalid data format from external API."}, 500
+        formatted_results = {
+            "results": self._format_anime_list_common(raw_data.get("results", [])),
+            "total_pages": raw_data.get("total_pages", 1)
+        }
+        return formatted_results, 200
 
-        formatted_results = [{
-            "title": item.get("title"),
-            "link": item.get("link")
-        } for item in raw_data['results']]
-
-        logger.debug("AnimeController: Successfully formatted top search data.")
-        return {"results": formatted_results}, 200
-
-
-    def get_anime_details(self, anime_id: str) -> tuple[dict, int]:
+    def get_anime_details_data(self, anime_id: str) -> tuple[dict, int]:
         """
-        Fetches and formats details for a specific anime from the 'anime-api'.
+        Fetches comprehensive details for a specific anime and formats them.
+        This method will make multiple calls to the anime-api service to gather all necessary data.
         """
-        logger.debug(f"AnimeController: Fetching details for anime ID: {anime_id}")
-        raw_data, status_code = self.anime_api_service.get_anime_info(anime_id)
+        logger.debug(f"AnimeController: Fetching comprehensive details for anime ID: {anime_id}")
 
-        if status_code != 200:
-            return raw_data, status_code
+        # 1. Fetch main anime info using get_anime_info (maps to /api/info/{id} in Node.js)
+        # This endpoint should provide the 'data' and 'seasons' objects as per user's info.
+        main_info_data, main_info_status = self.anime_api_service.get_anime_info(anime_id)
+        if main_info_status != 200 or not main_info_data.get('success'):
+            logger.error(f"AnimeController: Failed to fetch main info for {anime_id}. Status: {main_info_status}, Data: {main_info_data}")
+            return {"error": f"Failed to retrieve main anime details: {main_info_data.get('message', 'Unknown error')}"}, main_info_status
 
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data or 'data' not in raw_data['results']:
-            logger.error(f"AnimeController: Invalid or missing 'results.data' in anime details for ID {anime_id}.")
-            return {"error": "Invalid data format from external API."}, 500
+        results = main_info_data.get('results', {})
+        anime_data = results.get('data', {})
+        anime_info_nested = anime_data.get('animeInfo', {}) # Access the nested animeInfo
 
-        anime_data = raw_data['results']['data']
-        anime_info = anime_data.get("animeInfo", {})
+        if not anime_data:
+            logger.error(f"AnimeController: No 'data' found in results for main info of {anime_id}.")
+            return {"error": "No anime details found for the given ID."}, 404
 
-        # Format related and recommended data
-        related_data = []
-        for group in raw_data['results'].get('related_data', []):
-            related_data.extend(self._format_anime_list_general(group)) # Use general formatter
-
-        recommended_data = []
-        for group in raw_data['results'].get('recommended_data', []):
-            recommended_data.extend(self._format_anime_list_general(group)) # Use general formatter
-
-
+        # Initialize formatted details with default empty lists/None to avoid key errors later
         formatted_details = {
             "id": anime_data.get("id"),
             "data_id": anime_data.get("data_id"),
             "title": anime_data.get("title"),
             "japanese_title": anime_data.get("japanese_title"),
+            "synonyms": anime_info_nested.get("Synonyms"), # From nested animeInfo
             "poster_url": anime_data.get("poster"),
-            "show_type": anime_data.get("showType"),
-            "adult_content": anime_data.get("adultContent", False),
-            "overview": anime_info.get("Overview"),
-            "synonyms": anime_info.get("Synonyms"),
-            "aired": anime_info.get("Aired"),
-            "premiered": anime_info.get("Premiered"),
-            "duration": anime_info.get("Duration"),
-            "status": anime_info.get("Status"),
-            "mal_score": anime_info.get("MAL Score"),
-            "genres": anime_info.get("Genres", []),
-            "studios": anime_info.get("Studios"),
-            "producers": anime_info.get("Producers", []),
-            "seasons": self._format_seasons_list(raw_data['results'].get('seasons', [])),
-            "characters_voice_actors": self._format_characters_voice_actors(raw_data['results'].get('charactersVoiceActors', [])),
-            "related_anime": related_data,
-            "recommended_anime": recommended_data,
+            "trailer_url": anime_data.get("trailer"), # Assuming trailer is at data level
+            "synopsis": anime_info_nested.get("Overview"), # From nested animeInfo
+            "show_type": anime_data.get("showType"), # From data level, Node.js uses showType
+            "status": anime_info_nested.get("Status"), # From nested animeInfo
+            "aired": anime_info_nested.get("Aired"), # From nested animeInfo
+            "premiered": anime_info_nested.get("Premiered"), # From nested animeInfo
+            "broadcast": anime_data.get("broadcast"), # Assuming broadcast is at data level, adjust if needed
+            "producers": anime_info_nested.get("Producers", []), # From nested animeInfo
+            "licensors": anime_data.get("licensors", []), # Assuming licensors is at data level, adjust if needed
+            "studios": anime_info_nested.get("Studios", []), # From nested animeInfo
+            "source": anime_data.get("source"), # Assuming source is at data level, adjust if needed
+            "genres": anime_info_nested.get("Genres", []), # From nested animeInfo
+            "duration": anime_info_nested.get("Duration"), # From nested animeInfo
+            "rating": anime_data.get("rating"), # Assuming rating is at data level, adjust if needed
+            "mal_score": anime_info_nested.get("MAL Score"), # From nested animeInfo
+            "scored_by": anime_data.get("scored_by"), # Assuming scored_by is at data level, adjust if needed
+            "rank": anime_data.get("rank"), # Assuming rank is at data level, adjust if needed
+            "popularity": anime_data.get("popularity"), # Assuming popularity is at data level, adjust if needed
+            "members": anime_data.get("members"), # Assuming members is at data level, adjust if needed
+            "favorites": anime_data.get("favorites"), # Assuming favorites is at data level, adjust if needed
+            "total_episodes_count": anime_data.get("total_episodes"), # From data level, adjust if needed
+            "episodes": [], # Will be populated by separate call
+            "characters_voice_actors": [], # Will be populated by separate call
+            "seasons": [], # Will be populated from 'results'
+            "related_anime": [], # Will be populated by separate call
+            "recommended_anime": [] # Will be populated by separate call
         }
-        logger.debug(f"AnimeController: Successfully formatted details for anime ID {anime_id}.")
+
+        # Seasons are at the 'results' level in the /api/info response
+        formatted_details["seasons"] = self._format_seasons(results.get("seasons", []))
+
+
+        # 2. Fetch Episodes List - This is a separate call to /api/episode/{id}
+        episodes_data, episodes_status = self.anime_api_service.get_episode_list(anime_id)
+        if episodes_status == 200 and episodes_data.get('success'):
+            formatted_details["episodes"] = self._format_episodes(episodes_data.get("results", []))
+        else:
+            logger.warning(f"AnimeController: Failed to fetch episodes for {anime_id}. Status: {episodes_status}, Data: {episodes_data}")
+            formatted_details["episodes_error"] = episodes_data.get('message', 'Failed to load episodes.') # Provide error to frontend
+
+        # 3. Fetch Characters & Voice Actors - This is a separate call to /api/characters/{id}
+        characters_data, characters_status = self.anime_api_service.get_characters_list(anime_id)
+        if characters_status == 200 and characters_data.get('success'):
+            formatted_details["characters_voice_actors"] = self._format_characters_voice_actors(characters_data.get("results", []))
+        else:
+            logger.warning(f"AnimeController: Failed to fetch characters for {anime_id}. Status: {characters_status}, Data: {characters_data}")
+            # Instead of just skipping, capture the error HTML if available
+            formatted_details["error_characters"] = characters_data.get('message', characters_data.get('error', characters_data)) # Capture full error response
+
+        # 5. Fetch Related Anime - This is a separate call to /api/related/{id}
+        related_data, related_status = self.anime_api_service.get_related_anime(anime_id)
+        if related_status == 200 and related_data.get('success'):
+            formatted_details["related_anime"] = self._format_anime_list_common(related_data.get("results", []))
+        else:
+            logger.warning(f"AnimeController: Failed to fetch related anime for {anime_id}. Status: {related_status}, Data: {related_data}")
+
+        # 6. Fetch Recommended Anime - This is a separate call to /api/recommendations/{id}
+        recommended_data, recommended_status = self.anime_api_service.get_recommended_anime(anime_id)
+        if recommended_status == 200 and recommended_data.get('success'):
+            formatted_details["recommended_anime"] = self._format_anime_list_common(recommended_data.get("results", []))
+        else:
+            logger.warning(f"AnimeController: Failed to fetch recommended anime for {anime_id}. Status: {recommended_status}, Data: {recommended_data}")
+
+
         return formatted_details, 200
 
-    def get_random_anime_data(self) -> tuple[dict, int]:
+    def get_qtip_info_data(self, qtip_id: int) -> tuple[dict, int]:
         """
-        Fetches and formats random anime data from the 'anime-api'.
-        """
-        logger.debug("AnimeController: Fetching random anime data.")
-        raw_data, status_code = self.anime_api_service.get_random_anime_info()
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data or 'data' not in raw_data['results']:
-            logger.error("AnimeController: Invalid or missing 'results.data' in random anime data.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        anime_data = raw_data['results']['data']
-        anime_info = anime_data.get("animeInfo", {})
-
-        related_data = []
-        for group in raw_data['results'].get('related_data', []):
-            related_data.extend(self._format_anime_list_general(group))
-
-        recommended_data = []
-        for group in raw_data['results'].get('recommended_data', []):
-            recommended_data.extend(self._format_anime_list_general(group))
-
-        formatted_random_data = {
-            "id": anime_data.get("id"),
-            "data_id": anime_data.get("data_id"),
-            "title": anime_data.get("title"),
-            "japanese_title": anime_data.get("japanese_title"),
-            "poster_url": anime_data.get("poster"),
-            "show_type": anime_data.get("showType"),
-            "adult_content": anime_data.get("adultContent", False),
-            "overview": anime_info.get("Overview"),
-            "synonyms": anime_info.get("Synonyms"),
-            "aired": anime_info.get("Aired"),
-            "premiered": anime_info.get("Premiered"),
-            "duration": anime_info.get("Duration"),
-            "status": anime_info.get("Status"),
-            "mal_score": anime_info.get("MAL Score"),
-            "genres": anime_info.get("Genres", []),
-            "studios": anime_info.get("Studios"),
-            "producers": anime_info.get("Producers", []),
-            "seasons": self._format_seasons_list(raw_data['results'].get('seasons', [])),
-            "characters_voice_actors": self._format_characters_voice_actors(raw_data['results'].get('charactersVoiceActors', [])),
-            "related_anime": related_data,
-            "recommended_anime": recommended_data,
-        }
-        logger.debug("AnimeController: Successfully formatted random anime data.")
-        return formatted_random_data, 200
-
-    def get_category_data(self, category: str, page: int = 1) -> tuple[dict, int]:
-        """
-        Fetches and formats anime list for a specific category from the 'anime-api'.
-        """
-        logger.debug(f"AnimeController: Fetching category '{category}' page {page}.")
-        raw_data, status_code = self.anime_api_service.get_category_info(category, page)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in category '{category}' data.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        results = raw_data['results']
-        formatted_data = {
-            "total_pages": results.get("totalPages"),
-            "data": self._format_anime_list_category(results.get("data", []))
-        }
-        logger.debug(f"AnimeController: Successfully formatted category '{category}' data.")
-        return formatted_data, 200
-
-    def get_producer_studio_anime_data(self, producer: str, page: int = 1) -> tuple[dict, int]:
-        """
-        Fetches and formats anime list for a specific producer/studio from the 'anime-api'.
-        """
-        logger.debug(f"AnimeController: Fetching anime for producer/studio '{producer}' page {page}.")
-        raw_data, status_code = self.anime_api_service.get_producer_studio_anime(producer, page)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in producer/studio '{producer}' data.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        results = raw_data['results']
-        formatted_data = {
-            "total_pages": results.get("totalPages"),
-            "data": self._format_anime_list_category(results.get("data", [])) # Re-use category formatter as structure is similar
-        }
-        logger.debug(f"AnimeController: Successfully formatted producer/studio '{producer}' data.")
-        return formatted_data, 200
-
-    def search_anime_data(self, keyword: str) -> tuple[dict, int]:
-        """
-        Searches and formats anime results by keyword from the 'anime-api'.
-        """
-        logger.debug(f"AnimeController: Searching anime for keyword: '{keyword}'.")
-        raw_data, status_code = self.anime_api_service.search_anime_by_keyword(keyword)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in search data for keyword '{keyword}'.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        formatted_results = self._format_anime_list_search(raw_data['results'])
-        logger.debug(f"AnimeController: Successfully formatted search results for keyword '{keyword}'.")
-        return {"results": formatted_results}, 200
-
-    def get_anime_search_suggestions(self, keyword: str) -> tuple[dict, int]:
-        """
-        Fetches and formats search suggestions for a keyword from the 'anime-api'.
-        """
-        logger.debug(f"AnimeController: Fetching search suggestions for keyword: '{keyword}'.")
-        raw_data, status_code = self.anime_api_service.get_search_suggestions(keyword)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in search suggestions for keyword '{keyword}'.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        formatted_suggestions = self._format_anime_list_suggestion(raw_data['results'])
-        logger.debug(f"AnimeController: Successfully formatted search suggestions for keyword '{keyword}'.")
-        return {"suggestions": formatted_suggestions}, 200
-
-    def filter_anime_data(self, params: dict) -> tuple[dict, int]:
-        """
-        Filters and formats anime data based on various criteria.
-        """
-        logger.debug(f"AnimeController: Filtering anime with params: {params}")
-        raw_data, status_code = self.anime_api_service.filter_anime(params)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in filtered anime data for params: {params}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        results = raw_data['results']
-        formatted_data = {
-            "total_pages": results.get("totalPages"),
-            "data": self._format_anime_list_category(results.get("data", [])) # Re-use category formatter
-        }
-        logger.debug(f"AnimeController: Successfully formatted filtered anime data with params: {params}.")
-        return formatted_data, 200
-
-    def get_anime_episode_list(self, anime_id: str) -> tuple[dict, int]:
-        """
-        Fetches and formats the episode list for a specific anime.
-        """
-        logger.debug(f"AnimeController: Fetching episode list for anime ID: {anime_id}")
-        raw_data, status_code = self.anime_api_service.get_anime_episodes(anime_id)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in episode list for anime ID {anime_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        results = raw_data['results']
-        formatted_episodes = {
-            "total_episodes": results.get("totalEpisodes"),
-            "episodes": [{
-                "episode_no": ep.get("episode_no"),
-                "id": ep.get("id"),
-                "data_id": ep.get("data_id"),
-                "jname": ep.get("jname"),
-                "title": ep.get("title"),
-                "japanese_title": ep.get("japanese_title")
-            } for ep in results.get("episodes", [])]
-        }
-        logger.debug(f"AnimeController: Successfully formatted episode list for anime ID {anime_id}.")
-        return formatted_episodes, 200
-
-    def get_upcoming_schedule_data(self, date: str) -> tuple[dict, int]:
-        """
-        Fetches and formats the schedule of upcoming anime for a specific date.
-        """
-        logger.debug(f"AnimeController: Fetching upcoming schedule for date: {date}")
-        raw_data, status_code = self.anime_api_service.get_upcoming_schedule(date)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in upcoming schedule for date {date}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        formatted_schedule = self._format_schedule_list(raw_data['results'])
-        logger.debug(f"AnimeController: Successfully formatted upcoming schedule for date: {date}.")
-        return {"results": formatted_schedule}, 200
-
-    def get_next_episode_schedule_data(self, anime_id: str) -> tuple[dict, int]:
-        """
-        Fetches and formats the schedule of the next episode for a specific anime.
-        """
-        logger.debug(f"AnimeController: Fetching next episode schedule for anime ID: {anime_id}")
-        raw_data, status_code = self.anime_api_service.get_next_episode_schedule(anime_id)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in next episode schedule for anime ID {anime_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        formatted_schedule = raw_data['results'].get("nextEpisodeSchedule")
-        logger.debug(f"AnimeController: Successfully formatted next episode schedule for anime ID: {anime_id}.")
-        return {"next_episode_schedule": formatted_schedule}, 200
-
-    def get_characters_data(self, anime_id: str) -> tuple[dict, int]:
-        """
-        Fetches and formats the list of characters for a specific anime.
-        """
-        logger.debug(f"AnimeController: Fetching characters for anime ID: {anime_id}")
-        raw_data, status_code = self.anime_api_service.get_characters_list(anime_id)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in characters list for anime ID {anime_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        results = raw_data['results']
-        formatted_characters = {
-            "current_page": results.get("currentPage"),
-            "total_pages": results.get("totalPages"),
-            "data": self._format_characters_voice_actors(results.get("data", []))
-        }
-        logger.debug(f"AnimeController: Successfully formatted characters list for anime ID {anime_id}.")
-        return formatted_characters, 200
-
-    def get_streaming_data(self, anime_id: str, server: str, stream_type: str) -> tuple[dict, int]:
-        """
-        Fetches and formats streaming information for an anime episode.
-        """
-        logger.debug(f"AnimeController: Fetching streaming info for ID: {anime_id}, server: {server}, type: {stream_type}")
-        raw_data, status_code = self.anime_api_service.get_streaming_info(anime_id, server, stream_type)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in streaming data for ID: {anime_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        results = raw_data['results']
-        # Defensive check: Ensure 'streamingLink' is a list before iterating
-        streaming_links_raw = results.get("streamingLink", [])
-        if streaming_links_raw is None: # Explicitly handle if it's None instead of a list
-            streaming_links_raw = []
-
-        formatted_streaming_links = []
-        for link_data in streaming_links_raw: # Iterate over the potentially empty or corrected list
-            formatted_streaming_links.append({
-                "id": link_data.get("id"),
-                "type": link_data.get("type"),
-                "link": link_data.get("link"), # This is already structured correctly as {file, type}
-                "tracks": link_data.get("tracks"),
-                "intro": link_data.get("intro"),
-                "outro": link_data.get("outro"),
-                "server": link_data.get("server")
-            })
-
-        formatted_servers = []
-        for server_data in results.get("servers", []):
-            formatted_servers.append({
-                "type": server_data.get("type"),
-                "data_id": server_data.get("data_id"),
-                "server_id": server_data.get("server_id"),
-                "server_name": server_data.get("server_name")
-            })
-
-        formatted_data = {
-            "streaming_links": formatted_streaming_links,
-            "servers": formatted_servers
-        }
-        logger.debug(f"AnimeController: Successfully formatted streaming data for ID: {anime_id}.")
-        return formatted_data, 200
-
-    def get_available_servers_data(self, anime_id: str, episode_id: str = None) -> tuple[dict, int]:
-        """
-        Fetches and formats available servers for an anime episode.
-        """
-        logger.debug(f"AnimeController: Fetching available servers for anime ID: {anime_id}, episode ID: {episode_id}")
-        raw_data, status_code = self.anime_api_service.get_available_servers(anime_id, episode_id)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in available servers for anime ID: {anime_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        formatted_servers = []
-        for server_data in raw_data['results']:
-            formatted_servers.append({
-                "type": server_data.get("type"),
-                "data_id": server_data.get("data_id"),
-                "server_id": server_data.get("server_id"),
-                "server_name": server_data.get("serverName") # Note: serverName here
-            })
-        logger.debug(f"AnimeController: Successfully formatted available servers for anime ID: {anime_id}.")
-        return {"servers": formatted_servers}, 200
-
-    def get_character_details_data(self, character_id: str) -> tuple[dict, int]:
-        """
-        Fetches and formats details for a specific character.
-        """
-        logger.debug(f"AnimeController: Fetching details for character ID: {character_id}")
-        raw_data, status_code = self.anime_api_service.get_character_details(character_id)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data or not raw_data['results'].get('data'):
-            logger.error(f"AnimeController: Invalid or missing 'results.data' in character details for ID {character_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        char_data = raw_data['results']['data'][0] # Assuming results.data is a list with one item
-        formatted_details = {
-            "id": char_data.get("id"),
-            "name": char_data.get("name"),
-            "profile_url": char_data.get("profile"),
-            "japanese_name": char_data.get("japaneseName"),
-            "about_description": char_data.get("about", {}).get("description"),
-            "about_style": char_data.get("about", {}).get("style"),
-            "voice_actors": [{
-                "name": va.get("name"),
-                "profile_url": va.get("profile"),
-                "language": va.get("language"),
-                "id": va.get("id")
-            } for va in char_data.get("voiceActors", [])],
-            "animeography": [{
-                "title": ani.get("title"),
-                "id": ani.get("id"),
-                "role": ani.get("role"),
-                "type": ani.get("type"),
-                "poster_url": ani.get("poster")
-            } for ani in char_data.get("animeography", [])]
-        }
-        logger.debug(f"AnimeController: Successfully formatted character details for ID {character_id}.")
-        return formatted_details, 200
-
-    def get_voice_actor_details_data(self, actor_id: str) -> tuple[dict, int]:
-        """
-        Fetches and formats details for a specific voice actor.
-        """
-        logger.debug(f"AnimeController: Fetching details for voice actor ID: {actor_id}")
-        raw_data, status_code = self.anime_api_service.get_voice_actor_details(actor_id)
-
-        if status_code != 200:
-            return raw_data, status_code
-
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data or not raw_data['results'].get('data'):
-            logger.error(f"AnimeController: Invalid or missing 'results.data' in voice actor details for ID {actor_id}.")
-            return {"error": "Invalid data format from external API."}, 500
-
-        actor_data = raw_data['results']['data'][0] # Assuming results.data is a list with one item
-        formatted_details = {
-            "id": actor_data.get("id"),
-            "name": actor_data.get("name"),
-            "profile_url": actor_data.get("profile"),
-            "japanese_name": actor_data.get("japaneseName"),
-            "about_description": actor_data.get("about", {}).get("description"),
-            "about_style": actor_data.get("about", {}).get("style"),
-            "roles": [{
-                "anime": {
-                    "title": role.get("anime", {}).get("title"),
-                    "poster_url": role.get("anime", {}).get("poster"),
-                    "type": role.get("anime", {}).get("type"),
-                    "year": role.get("anime", {}).get("year"),
-                    "id": role.get("anime", {}).get("id")
-                },
-                "character": {
-                    "name": role.get("character", {}).get("name"),
-                    "profile_url": role.get("character", {}).get("profile"),
-                    "role": role.get("character", {}).get("role")
-                }
-            } for role in actor_data.get("roles", [])]
-        }
-        logger.debug(f"AnimeController: Successfully formatted voice actor details for ID {actor_id}.")
-        return formatted_details, 200
-
-    def get_qtip_data(self, qtip_id: int) -> tuple[dict, int]:
-        """
-        Fetches and formats Qtip information for a specific anime.
+        Fetches and formats Qtip (quick info) data.
         """
         logger.debug(f"AnimeController: Fetching Qtip info for ID: {qtip_id}")
         raw_data, status_code = self.anime_api_service.get_qtip_info(qtip_id)
-
         if status_code != 200:
             return raw_data, status_code
+        return raw_data.get("results", {}), 200 # Assuming results directly contain the qtip object
 
-        if not raw_data or not raw_data.get('success') or 'results' not in raw_data:
-            logger.error(f"AnimeController: Invalid or missing 'results' in Qtip data for ID {qtip_id}.")
-            return {"error": "Invalid data format from external API."}, 500
+    def get_character_details_data(self, character_id: str) -> tuple[dict, int]:
+        """
+        Fetches and formats character details.
+        """
+        logger.debug(f"AnimeController: Fetching character details for ID: {character_id}")
+        raw_data, status_code = self.anime_api_service.get_character_details(character_id)
+        if status_code != 200:
+            return raw_data, status_code
+        return self._format_character_details(raw_data.get("results", {})), 200
 
-        qtip_results = raw_data['results']
-        formatted_qtip = {
-            "title": qtip_results.get("title"),
-            "rating": qtip_results.get("rating"),
-            "quality": qtip_results.get("quality"),
-            "sub_count": qtip_results.get("subCount"),
-            "dub_count": qtip_results.get("dubCount"),
-            "episode_count": qtip_results.get("episodeCount"),
-            "type": qtip_results.get("type"),
-            "description": qtip_results.get("description"),
-            "japanese_title": qtip_results.get("japaneseTitle"),
-            "synonyms": qtip_results.get("Synonyms"),
-            "aired_date": qtip_results.get("airedDate"),
-            "status": qtip_results.get("status"),
-            "genres": qtip_results.get("genres"),
-            "watch_link": qtip_results.get("watchLink")
-        }
-        logger.debug(f"AnimeController: Successfully formatted Qtip data for ID: {qtip_id}.")
-        return formatted_qtip, 200
+    def get_voice_actor_details_data(self, actor_id: str) -> tuple[dict, int]:
+        """
+        Fetches and formats voice actor details.
+        """
+        logger.debug(f"AnimeController: Fetching voice actor details for ID: {actor_id}")
+        raw_data, status_code = self.anime_api_service.get_voice_actor_details(actor_id)
+        if status_code != 200:
+            return raw_data, status_code
+        return self._format_voice_actor_details(raw_data.get("results", {})), 200
+
+    def get_available_servers_data(self, anime_id: str, episode_data_id: str) -> tuple[dict, int]:
+        """
+        Fetches and formats available servers for an anime episode.
+        """
+        logger.debug(f"AnimeController: Fetching servers for anime ID: {anime_id}, episode data_id: {episode_data_id}")
+        # IMPORTANT: The Node.js API expects 'ep' parameter to be the episode's data_id
+        raw_data, status_code = self.anime_api_service.get_available_servers(anime_id, episode_data_id)
+        if status_code != 200:
+            return raw_data, status_code
+        return {"servers": self._format_servers(raw_data.get("results", []))}, 200
+
+    def get_streaming_info_data(self, anime_id: str, server_id: str, stream_type: str) -> tuple[dict, int]:
+        """
+        Fetches and formats streaming information for a selected server and episode.
+        """
+        logger.debug(f"AnimeController: Fetching streaming info for anime ID: {anime_id}, server ID: {server_id}, type: {stream_type}")
+        raw_data, status_code = self.anime_api_service.get_streaming_info(anime_id, server_id, stream_type)
+        if status_code != 200:
+            return raw_data, status_code
+        return {"streaming_links": self._format_streaming_info(raw_data.get("results", {}))}, 200
+
 
     def _format_anime_list_home(self, anime_list: list) -> list:
-        """Helper to format common anime list structures found in home endpoint."""
+        """Helper to format general anime list structures for home page."""
         formatted = []
         for anime in anime_list:
-            tv_info = anime.get("tvInfo", {})
+            # Ensure 'id' exists before processing
+            if not anime.get("id"):
+                continue
             formatted.append({
                 "id": anime.get("id"),
-                "data_id": anime.get("data_id"),
-                "poster_url": anime.get("poster"),
                 "title": anime.get("title"),
-                "japanese_title": anime.get("japanese_title"),
-                "description": anime.get("description"),
-                "show_type": tv_info.get("showType"),
-                "duration": tv_info.get("duration"),
-                "release_date": tv_info.get("releaseDate"),
-                "quality": tv_info.get("quality"),
-                "sub_episodes": tv_info.get("sub"), # These are directly in tvInfo for home
-                "dub_episodes": tv_info.get("dub"), # These are directly in tvInfo for home
-                "total_episodes": tv_info.get("eps"),
-                "number": anime.get("number"), # For trending
-                "adult_content": anime.get("adultContent", False)
+                "poster_url": anime.get("poster"),
+                "jname": anime.get("jname"),
+                "show_type": anime.get("type"), # 'type' field from Node.js API
+                "score": anime.get("score") # 'score' field from Node.js API
             })
         return formatted
 
-    def _format_anime_list_general(self, anime_list: list) -> list:
-        """Helper to format common anime list structures (e.g., related/recommended)."""
+    def _format_anime_list_common(self, anime_list: list) -> list:
+        """Helper to format common anime list structures (search, category, related, recommended)."""
         formatted = []
         for anime in anime_list:
-            tv_info = anime.get("tvInfo", {})
+            if not anime.get("id"):
+                continue
             formatted.append({
                 "id": anime.get("id"),
-                "data_id": anime.get("data_id"),
-                "poster_url": anime.get("poster"),
                 "title": anime.get("title"),
-                "japanese_title": anime.get("japanese_title"),
-                "description": anime.get("description"), # Might be empty
-                "show_type": tv_info.get("showType"),
-                "duration": tv_info.get("duration"),
-                "sub_episodes": tv_info.get("sub"),
-                "dub_episodes": tv_info.get("dub"),
-                "total_episodes": tv_info.get("eps"),
-                "adult_content": anime.get("adultContent", False)
-            })
-        return formatted
-
-    def _format_anime_list_top_ten(self, anime_list: list) -> list:
-        """Helper to format anime list structures for top-ten endpoint."""
-        formatted = []
-        for anime in anime_list:
-            tv_info = anime.get("tvInfo", {})
-            formatted.append({
-                "id": anime.get("id"),
-                "data_id": anime.get("data_id"),
-                "number": anime.get("number"),
-                "name": anime.get("name"), # 'name' here instead of 'title'
                 "poster_url": anime.get("poster"),
-                "show_type": tv_info.get("showType"),
-                "duration": tv_info.get("duration"),
-                "sub_episodes": tv_info.get("sub"),
-                "dub_episodes": tv_info.get("dub"),
-                "total_episodes": tv_info.get("eps")
+                "jname": anime.get("jname"),
+                "show_type": anime.get("type"),
+                "score": anime.get("score")
             })
         return formatted
 
-    def _format_anime_list_category(self, anime_list: list) -> list:
-        """Helper to format anime list structures for category and producer endpoints."""
+
+    def _format_episodes(self, episodes_list: list) -> list:
+        """
+        Helper to format episodes list structures.
+        Crucially, it now attempts to extract `data_id` from the `id` string if `data_id` is null.
+        """
         formatted = []
-        for anime in anime_list:
-            tv_info = anime.get("tvInfo", {})
+        for episode in episodes_list:
+            episode_id_from_node = episode.get("id")
+            extracted_data_id = episode.get("data_id")
+
+            # If data_id is null, try to extract it from the 'id' URL string
+            if extracted_data_id is None and episode_id_from_node:
+                match = re.search(r'\?ep=(\d+)', episode_id_from_node)
+                if match:
+                    extracted_data_id = match.group(1) # Extract the number after '?ep='
+                    logger.info(f"Extracted data_id: {extracted_data_id} from episode ID: {episode_id_from_node}")
+                else:
+                    logger.warning(f"Could not extract data_id from episode ID: {episode_id_from_node}")
+
             formatted.append({
-                "id": anime.get("id"),
-                "data_id": anime.get("data_id"),
-                "poster_url": anime.get("poster"),
-                "title": anime.get("title"),
-                "japanese_title": anime.get("japanese_title"),
-                "description": anime.get("description"),
-                "show_type": tv_info.get("showType"),
-                "duration": tv_info.get("duration"),
-                "sub_episodes": tv_info.get("sub"),
-                "dub_episodes": tv_info.get("dub"),
-                "total_episodes": tv_info.get("eps"),
-                "adult_content": anime.get("adultContent", False)
+                "id": episode_id_from_node, # Keep the original ID for linking/reference
+                "episode_no": episode.get("episode"), # Node.js API often uses 'episode' for episode number
+                "data_id": extracted_data_id, # Use the extracted or original data_id
+                "title": episode.get("title"),
+                "japanese_title": episode.get("japanese_title")
             })
         return formatted
 
-    def _format_anime_list_search(self, anime_list: list) -> list:
-        """Helper to format anime list structures for search endpoint."""
-        formatted = []
-        for anime in anime_list:
-            tv_info = anime.get("tvInfo", {})
-            formatted.append({
-                "id": anime.get("id"),
-                "data_id": anime.get("data_id"),
-                "poster_url": anime.get("poster"),
-                "title": anime.get("title"),
-                "japanese_title": anime.get("japanese_title"),
-                "show_type": tv_info.get("showType"),
-                "duration": tv_info.get("duration"),
-                "sub_episodes": tv_info.get("sub"),
-                "dub_episodes": tv_info.get("dub"),
-                "total_episodes": tv_info.get("eps"),
-            })
-        return formatted
-
-    def _format_anime_list_suggestion(self, anime_list: list) -> list:
-        """Helper to format anime list structures for search suggestions endpoint."""
-        formatted = []
-        for anime in anime_list:
-            formatted.append({
-                "id": anime.get("id"),
-                "data_id": anime.get("data_id"),
-                "poster_url": anime.get("poster"),
-                "title": anime.get("title"),
-                "japanese_title": anime.get("japanese_title"),
-                "release_date": anime.get("releaseDate"),
-                "show_type": anime.get("showType"),
-                "duration": anime.get("duration"),
-            })
-        return formatted
-
-
-    def _format_schedule_list(self, schedule_list: list) -> list:
-        """Helper to format schedule list structures."""
-        formatted = []
-        for item in schedule_list:
-            formatted.append({
-                "id": item.get("id"),
-                "data_id": item.get("data_id"),
-                "title": item.get("title"),
-                "japanese_title": item.get("japanese_title"),
-                "release_date": item.get("releaseDate"),
-                "time": item.get("time"),
-                "episode_no": item.get("episode_no")
-            })
-        return formatted
-
-    def _format_seasons_list(self, seasons_list: list) -> list:
+    def _format_seasons(self, seasons_list: list) -> list:
         """Helper to format seasons list structures."""
         formatted = []
         for season in seasons_list:
@@ -745,6 +332,67 @@ class AnimeController:
                 "voice_actors": formatted_v_actors
             })
         return formatted
+
+    def _format_character_details(self, character_data: dict) -> dict:
+        """Helper to format single character details."""
+        if not character_data:
+            return {}
+        return {
+            "id": character_data.get("id"),
+            "name": character_data.get("name"),
+            "poster_url": character_data.get("poster"),
+            "description": character_data.get("description"),
+            "animeography": self._format_anime_list_common(character_data.get("animeography", [])),
+            "mangaography": character_data.get("mangaography", []), # No specific formatting, assume list of strings/objects
+            "voice_actors": self._format_characters_voice_actors([{"voiceActors": character_data.get("voiceActors", [])}]).pop().get("voice_actors", [])
+        }
+
+    def _format_voice_actor_details(self, actor_data: dict) -> dict:
+        """Helper to format single voice actor details."""
+        if not actor_data:
+            return {}
+        return {
+            "id": actor_data.get("id"),
+            "name": actor_data.get("name"),
+            "poster_url": actor_data.get("poster"),
+            "description": actor_data.get("description"),
+            "language": actor_data.get("language"),
+            "characters_played": self._format_characters_voice_actors(actor_data.get("characters_played", [])) # Re-use char formatting
+        }
+
+    def _format_servers(self, servers_list: list) -> list:
+        """Helper to format available servers list."""
+        formatted = []
+        for server in servers_list:
+            formatted.append({
+                "type": server.get("type"),
+                "data_id": server.get("data_id"), # This should now be correctly populated from Node.js
+                "server_id": server.get("server_id"),
+                "server_name": server.get("serverName")
+            })
+        return formatted
+
+    def _format_streaming_info(self, streaming_info: dict) -> list:
+        """Helper to format streaming info, specifically extracting links."""
+        if not streaming_info:
+            return []
+
+        links = []
+        # The Node.js API response for streaming info has a 'streamingLink' object
+        # which contains 'link' object with 'file', 'type', 'tracks', 'intro', 'outro'.
+        # We only care about the main file link for now.
+        streaming_link_details = streaming_info.get("streamingLink", {})
+        file_link = streaming_link_details.get("link", {}).get("file")
+        server_name = streaming_link_details.get("server")
+        link_type = streaming_link_details.get("type") # e.g., "hls"
+
+        if file_link:
+            links.append({
+                "file": file_link,
+                "server": server_name,
+                "type": link_type
+            })
+        return links
 
 # Initialize the controller
 anime_controller = AnimeController()

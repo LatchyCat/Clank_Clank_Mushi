@@ -1,5 +1,5 @@
 # backend/routes/llm_api_routes.py
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response, stream_with_context # NEW: Import Response and stream_with_context
 from controllers.llm_controller import LLMController # Import our LLMController
 
 # Create a Blueprint for LLM-related API routes
@@ -11,20 +11,23 @@ def chat_with_llm():
     """
     API endpoint for sending user queries to the configured LLM (Mushi).
     Expects a JSON body with a 'query' field.
+    Returns a streaming response.
     """
     data = request.get_json()
     user_query = data.get('query')
 
     if not user_query:
+        # For non-streaming error, we still return JSON with 400 status
         return jsonify({"error": "Missing 'query' field in request body."}), 400
 
-    # Call the LLMController to generate a response
-    llm_response, status_code = LLMController.generate_llm_response(user_query)
+    # Call the LLMController's streaming generation function
+    # stream_with_context ensures the Flask app context is available within the generator
+    response_generator = LLMController.generate_llm_response(user_query)
 
-    if status_code == 200:
-        return jsonify({"response": llm_response}), status_code
-    else:
-        return jsonify({"error": llm_response}), status_code
+    # Return a streaming response with appropriate MIME type
+    # Each yielded chunk from the generator will be sent directly to the client
+    return Response(stream_with_context(response_generator), mimetype='text/event-stream')
+
 
 @llm_api_bp.route('/providers', methods=['GET'])
 def get_llm_providers_route():
@@ -71,3 +74,4 @@ def suggest_questions_route():
 
     suggested_data, status_code = LLMController.suggest_followup_questions(last_response_text)
     return jsonify(suggested_data), status_code
+

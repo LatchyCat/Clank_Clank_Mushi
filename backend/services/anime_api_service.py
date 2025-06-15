@@ -99,6 +99,15 @@ class AnimeAPIService:
         logger.info(f"AnimeAPIService: Fetching details for anime ID: {anime_id}")
         return self._make_request(f"/api/anime/{anime_id}")
 
+    def get_anime_info(self, anime_id: str) -> tuple[dict, int]:
+        """
+        Fetches comprehensive anime information (details, episodes, etc.)
+        Corresponds to GET /api/info/{id} from the Node.js API.
+        This endpoint provides the most complete initial data for an anime.
+        """
+        logger.info(f"AnimeAPIService: Fetching comprehensive info for anime ID: {anime_id} using /api/info.")
+        return self._make_request(f"/api/info/{anime_id}")
+
     def get_anime_by_category(self, category: str, page: int = 1, limit: int = 20) -> tuple[dict, int]:
         """
         Fetches a list of anime by category.
@@ -109,6 +118,39 @@ class AnimeAPIService:
         # The category name might contain slashes (e.g., 'genre/action'), so it needs to be part of the path
         # and correctly URL-encoded by requests.
         return self._make_request(f"/api/{category}", params=params) # CORRECTED LINE
+
+    def get_episode_list(self, anime_id: str) -> tuple[dict, int]:
+        """
+        Fetches the list of episodes for a given anime ID.
+        Corresponds to GET /api/episode/{id} from the Node.js API.
+        """
+        logger.info(f"AnimeAPIService: Fetching episode list for anime ID: {anime_id}")
+        return self._make_request(f"/api/episode/{anime_id}")
+
+    def get_characters_list(self, anime_id: str, page: int = 1) -> tuple[dict, int]:
+        """
+        Fetches the list of characters for a given anime ID.
+        Corresponds to GET /api/characters/{id}?page={page} from the Node.js API.
+        """
+        logger.info(f"AnimeAPIService: Fetching characters list for anime ID: {anime_id}, page: {page}")
+        params = {"page": page}
+        return self._make_request(f"/api/characters/{anime_id}", params=params)
+
+    def get_related_anime(self, anime_id: str) -> tuple[dict, int]:
+        """
+        Fetches related anime for a given anime ID.
+        Corresponds to GET /api/related/{id} from the Node.js API.
+        """
+        logger.info(f"AnimeAPIService: Fetching related anime for anime ID: {anime_id}")
+        return self._make_request(f"/api/related/{anime_id}")
+
+    def get_recommended_anime(self, anime_id: str) -> tuple[dict, int]:
+        """
+        Fetches recommended anime for a given anime ID.
+        Corresponds to GET /api/recommendations/{id} from the Node.js API.
+        """
+        logger.info(f"AnimeAPIService: Fetching recommended anime for anime ID: {anime_id}")
+        return self._make_request(f"/api/recommendations/{anime_id}")
 
     def get_streaming_info(self, anime_id: str, server: str, stream_type: str = "sub") -> tuple[dict, int]:
         """

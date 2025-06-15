@@ -45,7 +45,9 @@ def update_data_and_save_job(): # Renamed to be more general
 
 def create_app():
     app = Flask(__name__)
-    CORS(app) # Enable CORS for all routes
+    # Enable CORS for specific origins (your frontend and Flask itself)
+    # This explicit configuration should reliably resolve CORS issues.
+    CORS(app, origins=["http://localhost:5173", "http://127.0.0.1:8001"])
 
     app.config.from_object(Config)
 
@@ -99,7 +101,7 @@ def create_app():
     # REMOVED: Duplicated LLM routes. They will now be handled by llm_api_bp.
     # @app.route('/api/llm/providers', methods=['GET'])
     # def get_llm_providers():
-    #     return jsonify(Config.LLM_PROVIDERS), 200
+    #     return jsonify(Config.LLM_PROVIDers), 200
 
     # @app.route('/api/llm/set-provider', methods=['POST'])
     # def set_llm_provider():
@@ -120,3 +122,4 @@ if __name__ == '__main__':
     print(f"Debug mode: {app.config['DEBUG']}")
     print(f"Current LLM for generation: {Config.CURRENT_GENERATION_LLM}")
     app.run(debug=Config.DEBUG, host=Config.HOST, port=Config.PORT)
+
