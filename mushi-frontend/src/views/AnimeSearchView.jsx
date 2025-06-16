@@ -1,6 +1,8 @@
 // mushi-frontend/src/views/AnimeSearchView.jsx
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+
+// CORRECTED IMPORTS
 import WebSearch from '@/components/anime/searchbar/WebSearch';
 import AnimeSearchResults from '@/components/anime/search/AnimeSearchResults';
 
@@ -8,7 +10,6 @@ function AnimeSearchView() {
   const [searchParams] = useSearchParams();
   const [searchQuery, setSearchQuery] = useState(searchParams.get('keyword') || '');
 
-  // This effect ensures the search results update if the URL changes
   useEffect(() => {
     setSearchQuery(searchParams.get('keyword') || '');
   }, [searchParams]);

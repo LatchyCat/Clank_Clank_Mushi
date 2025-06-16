@@ -1,11 +1,11 @@
-// src/views/AnimeDetailView.jsx
+// src/components/anime/details/AnimeDetailViewer.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { api } from '@/src/services/api';
 
-// Import our new and existing components
-import VoiceActorList from '@/src/components/anime/actors/VoiceActorList';
-import CategoryCard from '@/src/components/categorycard/CategoryCard'; // For related/recommended
+// CORRECTED IMPORTS
+import { api } from '@/services/api';
+import VoiceActorList from '@/components/anime/actors/VoiceActorList';
+import CategoryCard from '@/components/categorycard/CategoryCard';
 
 function AnimeDetailView() {
   const { animeId } = useParams();
@@ -16,7 +16,7 @@ function AnimeDetailView() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    window.scrollTo(0, 0); // Scroll to top on new anime load
+    window.scrollTo(0, 0);
     setIsLoading(true);
     api.anime.getDetails(animeId)
       .then(data => {
@@ -42,7 +42,6 @@ function AnimeDetailView() {
 
   const firstEpisodeId = animeDetails.episodes?.[0]?.id;
 
-  // Helper for displaying info neatly
   const infoItems = [
     { label: 'Type', value: animeDetails.show_type },
     { label: 'Status', value: animeDetails.status },
@@ -51,11 +50,10 @@ function AnimeDetailView() {
     { label: 'Episodes', value: animeDetails.total_episodes_count || 'N/A' },
     { label: 'Duration', value: animeDetails.duration },
     { label: 'Rating', value: animeDetails.rating },
-  ].filter(item => item.value); // Filter out items with no value
+  ].filter(item => item.value);
 
   return (
     <div className="p-4 md:p-6 text-gray-100">
-      {/* Header with Title and Watch/Ask Buttons */}
       <div className="mb-8">
         <h1 className="text-3xl md:text-5xl font-extrabold text-white mb-4 drop-shadow-lg">{animeDetails.title}</h1>
         <div className="flex flex-wrap gap-4">
@@ -75,9 +73,7 @@ function AnimeDetailView() {
         </div>
       </div>
 
-      {/* Main Content Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-        {/* Left Sidebar / Info Column */}
         <aside className="lg:col-span-1 space-y-6">
           <img src={animeDetails.poster_url} alt={animeDetails.title} className="w-full h-auto object-cover rounded-2xl shadow-xl" />
           <div className="bg-white/5 p-4 rounded-xl border border-white/10">
@@ -93,7 +89,6 @@ function AnimeDetailView() {
           </div>
         </aside>
 
-        {/* Right Content Area */}
         <main className="lg:col-span-3 space-y-8">
           <div>
             <h3 className="text-2xl font-bold mb-2 text-gray-200">Synopsis</h3>
@@ -106,7 +101,7 @@ function AnimeDetailView() {
              <CategoryCard
                 label="Related Anime"
                 data={animeDetails.related_anime}
-                showViewMore={false} // Don't need a "view more" link here
+                showViewMore={false}
              />
           )}
 

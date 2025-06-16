@@ -1,8 +1,10 @@
-// src/views/AtoZListView.jsx (NEW FILE)
+// src/views/AtoZListView.jsx
 import React, { useState, useEffect } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
-import { api } from '@/src/services/api';
-import CategoryCard from '@/src/components/categorycard/CategoryCard'; // Reusing for grid display
+
+// CORRECTED IMPORTS
+import { api } from '@/services/api';
+import CategoryCard from '@/components/categorycard/CategoryCard';
 
 const ALPHABET = ["All", "#", "0-9", ...Array.from({ length: 26 }, (_, i) => String.fromCharCode(65 + i))];
 
@@ -20,12 +22,10 @@ function AtoZListView() {
     setIsLoading(true);
     setError(null);
 
-    // Construct the category slug for the API call
     const categorySlug = `az-list/${activeLetter === 'All' ? '' : activeLetter}`;
 
     api.anime.getByCategory(categorySlug)
       .then(data => {
-        // The API returns { data: [...] } for this endpoint
         setAnimeList(data?.data || []);
       })
       .catch(err => {
@@ -34,13 +34,11 @@ function AtoZListView() {
       })
       .finally(() => setIsLoading(false));
 
-  }, [activeLetter, location.key]); // Rerun when the letter changes
+  }, [activeLetter, location.key]);
 
   return (
     <div className="container mx-auto py-6">
       <h2 className="text-3xl font-extrabold text-white text-center mb-6">A-Z Anime List</h2>
-
-      {/* A-Z Navigation */}
       <nav className="flex flex-wrap justify-center gap-2 mb-8 p-4 bg-white/5 rounded-lg">
         {ALPHABET.map(char => (
           <Link
@@ -56,15 +54,13 @@ function AtoZListView() {
           </Link>
         ))}
       </nav>
-
-      {/* Results Display */}
       {isLoading && <div className="text-center p-10 text-indigo-300 animate-pulse">Mushi is sorting the library...</div>}
       {error && <div className="text-center p-10 text-red-400">{error}</div>}
       {!isLoading && !error && (
         <CategoryCard
           label={`Showing results for: ${activeLetter}`}
           data={animeList}
-          showViewMore={false} // We are already on the full view
+          showViewMore={false}
         />
       )}
     </div>

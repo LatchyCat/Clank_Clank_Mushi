@@ -1,29 +1,26 @@
 // src/views/WatchView.jsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { api } from '@/src/services/api';
-import Player from '@/src/components/anime/player/Player';
-import EpisodeList from '@/src/components/anime/player/Episodelist';
-import Servers from '@/src/components/anime/player/Servers';
-import { Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+
+// CORRECTED IMPORTS
+import { api } from '@/services/api';
+import Player from '@/components/anime/player/Player';
+import EpisodeList from '@/components/anime/player/Episodelist';
+import Servers from '@/components/anime/player/Servers';
 
 function WatchView() {
   const { animeId, episodeId } = useParams();
   const navigate = useNavigate();
 
-  // State for all data
   const [animeDetails, setAnimeDetails] = useState(null);
   const [currentEpisode, setCurrentEpisode] = useState(null);
   const [servers, setServers] = useState([]);
   const [currentServer, setCurrentServer] = useState(null);
   const [streamUrl, setStreamUrl] = useState('');
-
-  // State for UI feedback
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
   const [playerStatus, setPlayerStatus] = useState("Loading...");
 
-  // Fetch initial anime details and episode list
   useEffect(() => {
     setIsLoading(true);
     api.anime.getDetails(animeId)
@@ -33,7 +30,6 @@ function WatchView() {
         if (targetEpisode) {
           setCurrentEpisode(targetEpisode);
         } else if (data.episodes.length > 0) {
-          // If episodeId is invalid/missing, redirect to the first episode
           navigate(`/watch/${animeId}/${data.episodes[0].id}`, { replace: true });
         } else {
           setError("This anime has no episodes available.");
@@ -43,7 +39,6 @@ function WatchView() {
       .finally(() => setIsLoading(false));
   }, [animeId, episodeId, navigate]);
 
-  // Fetch servers when the current episode changes
   useEffect(() => {
     if (!currentEpisode) return;
     setPlayerStatus("Fetching server list...");
@@ -55,7 +50,7 @@ function WatchView() {
       .then(data => {
         if (data?.servers?.length > 0) {
           setServers(data.servers);
-          setCurrentServer(data.servers[0]); // Auto-select the first server
+          setCurrentServer(data.servers[0]);
         } else {
           setPlayerStatus("No servers found for this episode.");
         }
@@ -63,7 +58,6 @@ function WatchView() {
       .catch(err => setPlayerStatus(`Error fetching servers: ${err.message}`));
   }, [currentEpisode, animeId]);
 
-  // Fetch stream URL when the server changes
   useEffect(() => {
     if (!currentServer || !currentEpisode) return;
     setPlayerStatus(`Loading stream from ${currentServer.server_name}...`);
@@ -78,7 +72,7 @@ function WatchView() {
             src += `&referer=${encodeURIComponent(referer)}`;
           }
           setStreamUrl(src);
-          setPlayerStatus(null); // Clear status to show player
+          setPlayerStatus(null);
         } else {
           setPlayerStatus("Failed to get streaming link from this server.");
         }

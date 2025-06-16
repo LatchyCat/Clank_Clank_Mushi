@@ -1,7 +1,9 @@
-// src/components/anime/searchbar/Suggestion.jsx (NEW FILE)
+// src/components/anime/searchbar/Suggestion.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '@/src/services/api';
+
+// CORRECTED IMPORT
+import { api } from '@/services/api';
 
 function Suggestion({ keyword }) {
   const [suggestions, setSuggestions] = useState([]);
@@ -17,7 +19,6 @@ function Suggestion({ keyword }) {
     const fetchSuggestions = async () => {
       try {
         const data = await api.anime.getSearchSuggestions(keyword);
-        // The API returns an object with a 'results' array
         setSuggestions(data?.results || []);
       } catch (error) {
         console.error("Failed to fetch search suggestions:", error);
@@ -28,7 +29,7 @@ function Suggestion({ keyword }) {
     };
 
     fetchSuggestions();
-  }, [keyword]); // Depends on the debounced keyword
+  }, [keyword]);
 
   if (isLoading) {
     return (
@@ -39,7 +40,7 @@ function Suggestion({ keyword }) {
   }
 
   if (suggestions.length === 0) {
-    return null; // Don't render if no suggestions
+    return null;
   }
 
   return (
