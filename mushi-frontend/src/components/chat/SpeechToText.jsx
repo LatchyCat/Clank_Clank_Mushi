@@ -67,7 +67,7 @@ function SpeechToText({ onTranscript, onRecordingStatusChange, shouldStartRecord
     } else if (!shouldStartRecording && isListening) {
       stopRecognition();
     }
-  }, [shouldStartRecording]);
+  }, [shouldStartRecording, isListening, onSpeechError, onRecordingStatusChange]); // Added missing dependencies
 
   function stopRecognition() {
     clearSilenceTimeout();

@@ -29,7 +29,7 @@ function SpoilerText({ children, globalShieldActive }) {
   return (
     <span
       className={`relative inline-block cursor-pointer transition-all duration-200 ${
-        effectiveIsRevealed ? 'text-gray-200' : 'text-transparent bg-gray-500 rounded px-1'
+        effectiveIsRevealed ? 'text-gray-200' : 'text-transparent bg-purple-500/50 rounded px-1' // Softened background color
       }`}
       onClick={toggleReveal}
       title={effectiveIsRevealed ? "Click to hide spoiler" : "Click to reveal spoiler"}
@@ -37,7 +37,7 @@ function SpoilerText({ children, globalShieldActive }) {
       {effectiveIsRevealed ? (
         children
       ) : (
-        <span className="absolute inset-0 flex items-center justify-center text-gray-800 text-xs font-bold select-none pointer-events-none">
+        <span className="absolute inset-0 flex items-center justify-center text-purple-900 text-xs font-bold select-none pointer-events-none"> {/* Adjusted text color */}
           redacted
         </span>
       )}

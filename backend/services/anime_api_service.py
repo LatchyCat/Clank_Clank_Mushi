@@ -50,18 +50,10 @@ class AnimeAPIService:
         params = {"limit": limit}
         return self._make_request("/api/top-search", params=params)
 
-
     def search_anime(self, query: str, page: int = 1) -> tuple[dict, int]:
-        """
-        Searches for anime by query using the /api/search endpoint.
-        """
         logger.info(f"AnimeAPIService: Searching anime for query: '{query}', page: {page}")
-        # --- START FIX ---
-        # The Node.js API expects the parameter 'keyword', not 'q'.
         params = {"keyword": query, "page": page}
-        # --- END FIX ---
         return self._make_request("/api/search", params=params)
-
 
     def get_anime_info(self, anime_id: str) -> tuple[dict, int]:
         logger.info(f"AnimeAPIService: Fetching comprehensive info for anime ID: {anime_id} using /api/info.")
@@ -84,10 +76,11 @@ class AnimeAPIService:
             params['ep'] = episode_id
         return self._make_request(f"/api/servers/{anime_id}", params=params)
 
-    def get_streaming_info(self, stream_id: str, server: str, stream_type: str = "sub") -> tuple[dict, int]:
-        logger.info(f"AnimeAPIService: Fetching streaming info for ID: {stream_id}, server: {server}, type: {stream_type}")
-        params = {"id": stream_id, "server": server, "type": stream_type}
-        return self._make_request("/api/stream", params=params)
+    def get_streaming_info(self, episode_id: str, server: str, stream_type: str = "sub") -> tuple[dict, int]:
+        logger.info(f"AnimeAPIService: Fetching streaming info for episode ID: {episode_id}, server: {server}, type: {stream_type}")
+        endpoint = "/api/stream"
+        params = {"id": episode_id, "server": server, "type": stream_type}
+        return self._make_request(endpoint, params=params)
 
     def get_characters_list(self, anime_id: str, page: int = 1) -> tuple[dict, int]:
         logger.info(f"AnimeAPIService: Fetching characters list for anime ID: {anime_id}, page: {page}")

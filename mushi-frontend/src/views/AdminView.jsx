@@ -1,24 +1,34 @@
-// mushi-frontend/src/views/AdminView.jsx
 import React from 'react';
-import DataIngestionControls from '../components/data/DataIngestionControls'; // Import the new ingestion controls component
+import DataIngestionControls from '../components/data/DataIngestionControls';
+import { AlertTriangle } from 'lucide-react';
 
 /**
- * AdminView component serves as a protected page for administrative tasks,
- * starting with data ingestion controls. This view is accessible only after
- * successfully entering the admin password on the landing page.
+ * AdminView serves as the command center for managing the site's data knowledge base.
  */
 function AdminView() {
   return (
     <div className="container mx-auto py-6">
-      <h2 className="text-3xl font-extrabold text-white text-center mb-8">
-        Welcome to the Admin Command Center, Senpai! 👑
-      </h2>
-      <p className="text-lg text-gray-300 text-center mb-8">
-        Here, you can manage the data that powers Clank Clank Mushi. Please be careful, desu!~
-      </p>
-      {/* DataIngestionControls to manage data embedding */}
+      <div className="text-center mb-10">
+        <h2 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-orange-500 drop-shadow-lg mb-3">
+          Admin Command Center
+        </h2>
+        <p className="text-lg text-muted-foreground max-w-3xl mx-auto">
+          This is the control panel for Mushi's knowledge base. Use these tools to ingest new data and update the vector store.
+        </p>
+      </div>
+
+      <div className="max-w-3xl mx-auto p-6 bg-destructive/10 border border-destructive/30 rounded-lg mb-8 text-destructive-foreground">
+        <div className="flex items-center gap-4">
+          <AlertTriangle className="w-8 h-8 flex-shrink-0" />
+          <p className="text-sm">
+            <span className="font-bold">Warning:</span> These actions directly modify the site's data. Ingesting large amounts of data can be resource-intensive and take a long time. Proceed with caution.
+          </p>
+        </div>
+      </div>
+
+      {/* The main admin controls component */}
       <DataIngestionControls />
-      {/* You can add more admin-specific components here later */}
+
     </div>
   );
 }

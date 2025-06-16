@@ -30,53 +30,47 @@ function AnimeCategoryList({ category, categoryTitle = "Category" }) {
       try {
         setIsLoading(true);
         setError(null); // Clear previous errors
-        const data = await api.anime.getByCategory(category, currentPage); // Fetch anime for the category
+        const data = await api.anime.getByCategory(category, currentPage); // Pass category and page
 
-        if (data && data.data) { // Ensure 'data' key exists for the list of anime
-          setAnimeList(data.data);
-          setTotalPages(data.total_pages || 1); // Get total pages for pagination
-          console.log(`Mushi found sparkling anime for category "${category}" on page ${currentPage}, desu!~`, data.data);
+        // CORRECTED: Access data.results.data for the anime list and data.results.totalPages
+        if (data && data.data) { // Check if data and data.data exist
+          setAnimeList(data.data); // Set animeList to data.data (the actual array of anime)
+          setTotalPages(data.totalPages || 1); // Get totalPages from data.totalPages
+          console.log(`Mushi found anime for category '${category}' on page ${currentPage}, desu!~`, data.data);
         } else {
-          setAnimeList([]); // Set to empty array if no results
-          setTotalPages(1);
-          setError(`Muu... Mushi couldn't find any anime in the "${categoryTitle}" category. (T_T)`);
+          setError("Muu... Mushi couldn't find anime for that category. Gomen'nasai! (T_T)");
         }
       } catch (err) {
-        console.error(`Uwaah! Failed to fetch anime for category "${category}":`, err);
-        setError(`Mushi encountered an error while fetching "${categoryTitle}" anime: ${err.message || "Unknown error"} (>_<)`);
-        setAnimeList([]); // Ensure list is empty on error
-        setTotalPages(1);
+        console.error(`Uwaah! Failed to fetch anime for category '${category}' on page ${currentPage}:`, err);
+        setError(`Mushi encountered an error while fetching category data: ${err.message || "Unknown error"} (>_<)`);
       } finally {
         setIsLoading(false);
       }
     };
 
     fetchCategoryAnime();
-  }, [category, currentPage, categoryTitle]); // Re-run effect when category or page changes
-
-  const handleNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(prevPage => prevPage + 1);
-    }
-  };
+  }, [category, currentPage]); // Re-run effect when category or currentPage changes
 
   const handlePrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(prevPage => prevPage - 1);
-    }
+    setCurrentPage((prev) => Math.max(1, prev - 1));
+  };
+
+  const handleNextPage = () => {
+    setCurrentPage((prev) => Math.min(totalPages, prev + 1));
   };
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-64 text-indigo-300 text-lg">
-        Mushi is collecting all the adorable anime in the "{categoryTitle}" category for you, Senpai! Waku waku!~ ☆
+      <div className="flex justify-center items-center h-60 text-indigo-300 text-lg
+                      bg-white/5 backdrop-blur-sm rounded-3xl shadow-inner border border-purple-500/30">
+        Mushi is fetching {categoryTitle} anime! Waku waku!~ ☆
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="text-red-400 text-center p-4 border border-red-500 rounded-lg">
+      <div className="text-red-400 text-center p-6 border border-red-500 rounded-lg bg-red-900/30 text-lg mx-auto max-w-lg shadow-lg">
         Oh no! {error}
       </div>
     );
@@ -84,31 +78,44 @@ function AnimeCategoryList({ category, categoryTitle = "Category" }) {
 
   if (!animeList || animeList.length === 0) {
     return (
-      <div className="text-gray-400 text-center p-4">
-        Muu... No anime found in the "{categoryTitle}" category. (T_T)
+      <div className="text-gray-400 text-center p-6 text-lg mx-auto max-w-lg
+                      bg-white/5 backdrop-blur-sm rounded-3xl shadow-inner border border-gray-700/50">
+        Muu... No anime found for {categoryTitle}. (T_T)
       </div>
     );
   }
 
   return (
-    <div className="p-6 bg-gray-900 text-gray-100 min-h-screen">
-      <h2 className="text-3xl font-extrabold text-white text-center mb-8">
-        {categoryTitle} Anime List! ✨
+    <div className="p-6 text-gray-100">
+      <h2 className="text-4xl font-extrabold text-center mb-10
+                     bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-purple-600
+                     drop-shadow-lg [text-shadow:0_0_15px_rgba(150,100,255,0.4)]">
+        {categoryTitle}
       </h2>
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
         {animeList.map((anime) => (
-          <div key={anime.id} className="bg-gray-800 rounded-lg shadow-lg overflow-hidden transform hover:scale-105 transition-transform duration-300">
-            <Link to={`/app/anime/details/${anime.id}`}> {/* Link to AnimeDetailView */}
+          <div key={anime.id} className="bg-white/5 backdrop-blur-md rounded-xl shadow-lg overflow-hidden
+                                        transform hover:scale-105 transition-transform duration-300
+                                        border border-white/10 hover:border-indigo-500">
+            <Link to={`/app/anime/details/${anime.id}`} className="block">
               <img
                 src={anime.poster_url || 'https://placehold.co/150x220/333/FFF?text=No+Image'}
-                alt={anime.title || 'Anime Poster'}
-                className="w-full h-auto object-cover rounded-t-lg"
+                alt={anime.title}
+                className="w-full h-auto object-cover rounded-t-xl"
                 onError={(e) => { e.target.onerror = null; e.target.src='https://placehold.co/150x220/333/FFF?text=Image+Error'; }}
               />
-              <div className="p-3">
-                <h4 className="text-white text-md font-semibold truncate">{anime.title}</h4>
+              <div className="p-4">
+                <h4 className="text-white text-lg font-semibold truncate mb-1">{anime.title}</h4>
                 {anime.show_type && <p className="text-gray-400 text-sm">{anime.show_type}</p>}
-                {anime.adult_content && <span className="text-red-400 text-xs font-bold">18+</span>}
+                {anime.adult_content && <span className="text-red-400 text-xs font-bold mt-1 inline-block">18+</span>}
+                {anime.score && (
+                  <p className="text-yellow-400 text-sm mt-1 flex items-center">
+                    <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.538 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.783.57-1.838-.197-1.538-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.929 8.72c-.783-.57-.38-1.81.588-1.81h3.462a1 1 0 00.95-.69l1.07-3.292z" />
+                    </svg>
+                    {anime.score.toFixed(2)}
+                  </p>
+                )}
               </div>
             </Link>
           </div>
@@ -117,23 +124,27 @@ function AnimeCategoryList({ category, categoryTitle = "Category" }) {
 
       {/* Pagination Controls */}
       {totalPages > 1 && (
-        <div className="flex justify-center items-center gap-4 mt-8">
+        <div className="flex justify-center items-center gap-4 mt-10">
           <button
             onClick={handlePrevPage}
             disabled={currentPage === 1}
-            className="p-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+            className="p-3 rounded-full bg-purple-600 text-white hover:bg-purple-700
+                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200
+                       shadow-lg hover:shadow-xl"
             title="Previous Page"
           >
-            <ChevronLeft size={20} />
+            <ChevronLeft size={24} />
           </button>
-          <span className="text-gray-300 font-medium">Page {currentPage} of {totalPages}</span>
+          <span className="text-gray-300 font-medium text-lg">Page {currentPage} of {totalPages}</span>
           <button
             onClick={handleNextPage}
             disabled={currentPage === totalPages}
-            className="p-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+            className="p-3 rounded-full bg-purple-600 text-white hover:bg-purple-700
+                       disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200
+                       shadow-lg hover:shadow-xl"
             title="Next Page"
           >
-            <ChevronRight size={20} />
+            <ChevronRight size={24} />
           </button>
         </div>
       )}

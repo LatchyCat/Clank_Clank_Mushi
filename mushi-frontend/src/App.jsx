@@ -1,13 +1,15 @@
 // mushi-frontend/src/App.jsx
 import React, { useState, useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
 
 // Import Layout Components
 import TopNav from './components/navigation/TopNav';
 import FooterNav from './components/navigation/FooterNav';
+import MushiFab from './components/chat/MushiFab';
+import ChatModal from './components/chat/ChatModal';
 
-// Import Views
-import LandingView from './views/LandingView';
+// Import Views (SplashScreen is new, LandingView is replaced)
+import SplashScreen from './views/SplashScreen'; // NEW: Replaces LandingView for the root route
 import HomeView from './views/HomeView';
 import MushiAiView from './views/MushiAiView';
 import AnimeSearchView from './views/AnimeSearchView';
@@ -16,21 +18,32 @@ import AnimeCategoryView from './views/AnimeCategoryView';
 import CharacterDetailView from './views/CharacterDetailView';
 import VoiceActorDetailView from './views/VoiceActorDetailView';
 import DataView from './views/DataView';
-import AdminView from './views/AdminView'; // NEW: Import AdminView
+import AdminView from './views/AdminView';
+import WatchView from './views/WatchView';
+import AtoZListView from './views/AtoZListView';
 
-// AppLayout now accepts images and currentIndex as props, and passes them down
-const AppLayout = ({ images, currentIndex }) => (
-  <div className="min-h-screen flex flex-col bg-gray-900 text-gray-100 font-inter">
-    <TopNav images={images} currentIndex={currentIndex} /> {/* Pass props to TopNav */}
-    <main className="flex-grow p-6">
-      <Outlet /> {/* Renders the active nested route */}
-    </main>
-    <FooterNav images={images} currentIndex={currentIndex} /> {/* Pass props to FooterNav */}
-  </div>
-);
+// AppLayout remains the same, acting as the shared UI for the main application.
+// It receives props for the carousel and renders the active route via <Outlet />.
+const AppLayout = ({ images, currentIndex }) => {
+  const [isChatOpen, setIsChatOpen] = useState(false); // State for the chat modal
+
+  return (
+    <div className="min-h-screen flex flex-col bg-background text-foreground font-inter">
+      <TopNav images={images} currentIndex={currentIndex} />
+      <main className="flex-grow p-6">
+        <Outlet />
+      </main>
+      <FooterNav images={images} currentIndex={currentIndex} />
+
+      {/* Mushi AI Chat Components */}
+      <MushiFab onClick={() => setIsChatOpen(true)} />
+      <ChatModal isOpen={isChatOpen} onClose={() => setIsChatOpen(false)} />
+    </div>
+  );
+};
 
 function App() {
-  // Array of image paths for the carousel, now managed in the main App function
+  // State for the background carousel remains in App, so it's shared by TopNav and FooterNav.
   const images = [
     '/luffy_idea.png',
     '/luffy_gross.png',
@@ -49,36 +62,42 @@ function App() {
 
   const [currentIndex, setCurrentIndex] = useState(0);
 
-  // Auto-rotate the carousel every 12 seconds, managing state here for both navs
   useEffect(() => {
     const interval = setInterval(() => {
       setCurrentIndex((prevIndex) => (prevIndex + 1) % images.length);
     }, 12000); // Rotate every 12 seconds
-
-    // Cleanup interval on component unmount
     return () => clearInterval(interval);
-  }, [images.length]); // Re-run effect if image count changes
+  }, [images.length]);
 
   return (
     <Router>
       <Routes>
-        {/* Route for the marketing/info landing page, which now includes admin login */}
-        <Route path="/" element={<LandingView />} />
+        <Route path="/" element={<SplashScreen />} />
 
-        {/* Nested routes for the main application, all using AppLayout.
-            Pass images and currentIndex to AppLayout. */}
-        <Route path="/app" element={<AppLayout images={images} currentIndex={currentIndex} />}>
-          <Route index element={<HomeView />} />
-          <Route path="mushi_ai" element={<MushiAiView />} />
-          <Route path="anime_search" element={<AnimeSearchView />} />
-          <Route path="anime/details/:animeId" element={<AnimeDetailView />} />
-          <Route path="anime_category" element={<AnimeCategoryView />} />
-          <Route path="anime/character/:characterId" element={<CharacterDetailView />} />
-          <Route path="anime/actors/:actorId" element={<VoiceActorDetailView />} />
-          <Route path="data_insights" element={<DataView />} />
-          <Route path="admin_data" element={<AdminView />} /> {/* Route for Admin View (Data Ingestion) */}
+        <Route element={<AppLayout images={images} currentIndex={currentIndex} />}>
+          <Route path="/home" element={<HomeView />} />
+          <Route path="/mushi_ai" element={<MushiAiView />} />
 
+          {/* Update the search route path for clarity */}
+          <Route path="/search" element={<AnimeSearchView />} />
+
+          {/* Add the new A-Z List route */}
+          <Route path="/az-list" element={<AtoZListView />} />
+          <Route path="/az-list/:letter" element={<AtoZListView />} />
+
+          <Route path="/anime/details/:animeId" element={<AnimeDetailView />} />
+          <Route path="/watch/:animeId/:episodeId" element={<WatchView />} />
+          <Route path="/anime_category" element={<AnimeCategoryView />} />
+          <Route path="/anime/character/:characterId" element={<CharacterDetailView />} />
+          <Route path="/anime/actors/:actorId" element={<VoiceActorDetailView />} />
+          <Route path="/data_insights" element={<DataView />} />
+          <Route path="/admin_data" element={<AdminView />} />
+
+          {/* Old search path redirect (optional but good) */}
+          <Route path="/anime_search" element={<Navigate to="/search" replace />} />
         </Route>
+
+        <Route path="/app" element={<Navigate to="/home" replace />} />
       </Routes>
     </Router>
   );

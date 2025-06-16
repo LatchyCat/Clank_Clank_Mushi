@@ -46,7 +46,8 @@ function AnimeQuickInfoCard({ qtipId }) {
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-24 text-indigo-300 text-sm">
+      <div className="flex justify-center items-center h-24 text-indigo-300 text-sm
+                      bg-white/5 backdrop-blur-sm rounded-xl shadow-inner border border-purple-500/30">
         Mushi is thinking of a quick tip! Waku waku!~ ☆
       </div>
     );
@@ -54,7 +55,7 @@ function AnimeQuickInfoCard({ qtipId }) {
 
   if (error) {
     return (
-      <div className="text-red-400 text-center p-2 border border-red-500 rounded-lg text-sm">
+      <div className="text-red-400 text-center p-4 border border-red-500 rounded-xl bg-red-900/30 text-sm shadow-md">
         Oh no! {error}
       </div>
     );
@@ -62,24 +63,37 @@ function AnimeQuickInfoCard({ qtipId }) {
 
   if (!qtipInfo) {
     return (
-      <div className="text-gray-400 text-center p-2 text-sm">
+      <div className="text-gray-400 text-center p-4 text-sm
+                      bg-white/5 backdrop-blur-sm rounded-xl shadow-inner border border-gray-700/50">
         Muu... No quick info found. (T_T)
       </div>
     );
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg shadow-lg p-4 text-gray-100 border border-indigo-600">
-      <h3 className="text-xl font-bold text-indigo-400 mb-2">{qtipInfo.title || "Quick Info"}</h3>
-      <p className="text-gray-200 text-base leading-relaxed">{qtipInfo.description || "No description provided."}</p>
-      {qtipInfo.mal_link && (
+    <div className="bg-white/5 backdrop-blur-md rounded-xl shadow-2xl p-6 text-gray-100 border border-purple-500/30
+                    transform hover:scale-[1.02] transition-transform duration-300 hover:shadow-purple-500/20">
+      <h3 className="text-2xl font-bold mb-3
+                     bg-clip-text text-transparent bg-gradient-to-r from-pink-400 to-purple-400
+                     drop-shadow-lg [text-shadow:0_0_8px_rgba(255,100,255,0.2)]">
+        {qtipInfo.title || "Quick Info"}
+      </h3>
+      <p className="text-gray-200 text-base leading-relaxed mb-4">{qtipInfo.description || "No description provided."}</p>
+
+      {/* Optional: Add a link or button for more details */}
+      {qtipInfo.link && (
         <a
-          href={qtipInfo.mal_link}
+          href={qtipInfo.link}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-indigo-300 hover:text-indigo-200 text-sm mt-3 inline-block"
+          className="inline-flex items-center text-indigo-400 hover:text-indigo-300 text-sm font-medium
+                     bg-purple-800/50 px-4 py-2 rounded-full transition-all duration-200
+                     hover:bg-purple-700/70 shadow-md hover:shadow-lg"
         >
-          Read more on MyAnimeList~
+          Learn More~
+          <svg xmlns="http://www.w3.org/2000/svg" className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+          </svg>
         </a>
       )}
     </div>

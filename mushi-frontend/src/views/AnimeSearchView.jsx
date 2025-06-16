@@ -1,19 +1,17 @@
 // mushi-frontend/src/views/AnimeSearchView.jsx
-import React, { useState } from 'react';
-import AnimeSearchBar from '../components/anime/search/AnimeSearchBar';
-import AnimeSearchResults from '../components/anime/search/AnimeSearchResults';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import WebSearch from '@/components/anime/searchbar/WebSearch';
+import AnimeSearchResults from '@/components/anime/search/AnimeSearchResults';
 
-/**
- * AnimeSearchView component provides a dedicated page for searching anime.
- * It combines the search input and search results display.
- */
 function AnimeSearchView() {
-  const [searchQuery, setSearchQuery] = useState(''); // State to hold the current search query
+  const [searchParams] = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('keyword') || '');
 
-  // Callback function to handle search submission from AnimeSearchBar
-  const handleSearch = (query) => {
-    setSearchQuery(query); // Update the search query state
-  };
+  // This effect ensures the search results update if the URL changes
+  useEffect(() => {
+    setSearchQuery(searchParams.get('keyword') || '');
+  }, [searchParams]);
 
   return (
     <div className="container mx-auto py-6">
@@ -21,11 +19,8 @@ function AnimeSearchView() {
         Search for Your Favorite Anime, Senpai! 🔍
       </h2>
       <div className="max-w-xl mx-auto mb-8">
-        {/* AnimeSearchBar to get user input */}
-        <AnimeSearchBar onSearch={handleSearch} />
+        <WebSearch />
       </div>
-
-      {/* AnimeSearchResults to display results based on searchQuery */}
       <AnimeSearchResults query={searchQuery} />
     </div>
   );
