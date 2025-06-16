@@ -37,12 +37,15 @@ def get_top_ten_anime_route():
 @anime_api_bp.route('/search', methods=['GET'])
 def search_anime_route():
     """
-    API endpoint for searching anime from the new anime-api.
-    Corresponds to GET /api/search?q={query}&page={page} from the Node.js API.
+    API endpoint for searching anime from the anime-api.
     Example: GET /api/anime/search?q=one%20piece&page=1
     """
+    # --- START FIX ---
+    # Revert to expecting 'q' as the primary search parameter
     query = request.args.get('q', default='', type=str)
     page = request.args.get('page', default=1, type=int)
+    # --- END FIX ---
+
     logger.info(f"API Request: /api/anime/search with query='{query}', page={page}")
     data, status_code = anime_controller.search_anime_data(query, page)
     return jsonify(data), status_code
@@ -174,4 +177,3 @@ def get_qtip_info_route(qtip_id: int):
     logger.info(f"API Request: /api/anime/qtip/{qtip_id}")
     data, status_code = anime_controller.get_qtip_info_data(qtip_id)
     return jsonify(data), status_code
-
