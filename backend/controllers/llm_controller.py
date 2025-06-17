@@ -1,236 +1,188 @@
 # backend/controllers/llm_controller.py
-from services.gemini_llm_service import GeminiLLMService
+import re
+import urllib.parse
+from typing import List, Dict, Any, Tuple, Optional, Generator
+
 from services.ollama_llm_service import OllamaLLMService
 from config import Config
-# Import from the new globals.py module instead of app.py
-from globals import global_vector_store, global_ollama_embedder
-import json
-import re # Import for regex
-from typing import List, Dict, Any, Tuple, Optional, Generator # NEW: Import Generator
+from globals import global_vector_store, global_ollama_embedder, global_anime_controller
 
 class LLMController:
-    """
-    Controller for managing interactions with various LLM services.
-    It acts as a dispatcher, selecting the appropriate LLM service
-    based on the application's configuration.
-    """
-
     @staticmethod
     def get_llm_providers() -> Dict[str, str]:
-        """
-        Returns the dictionary of available LLM providers from Config.
-        """
         return Config.LLM_PROVIDERS
 
     @staticmethod
     def set_llm_provider(provider_key: str) -> Tuple[str, int]:
-        """
-        Sets the active LLM provider in Config.
-        """
         if provider_key in Config.LLM_PROVIDERS:
             Config.CURRENT_GENERATION_LLM = provider_key
-            print(f"DEBUG: LLM provider set to: {provider_key}")
             return f"LLM provider set to {provider_key}", 200
-        else:
-            return "Invalid LLM provider", 400
+        return "Invalid LLM provider", 400
 
     @staticmethod
     def get_current_llm_provider() -> Tuple[Dict[str, str], int]:
-        """
-        Returns the currently selected LLM provider key from Config.
-        """
         return {"current_provider": Config.CURRENT_GENERATION_LLM}, 200
 
+    @staticmethod
+    def _create_link_from_active_search(anime_title: str) -> Optional[str]:
+        """Actively searches for an anime title to get its ID and create a details page link."""
+        print(f"DEBUG: Active search for '{anime_title}'...")
+        suggestions_data, status_code = global_anime_controller.get_search_suggestions_data(anime_title)
+
+        if status_code == 200 and suggestions_data.get("results"):
+            normalized_search_title = ''.join(filter(str.isalnum, anime_title.lower()))
+            for suggestion in suggestions_data["results"]:
+                suggestion_title = suggestion.get("title", "")
+                normalized_suggestion_title = ''.join(filter(str.isalnum, suggestion_title.lower()))
+                if normalized_search_title in normalized_suggestion_title:
+                    anime_id = suggestion.get("id")
+                    official_title = suggestion.get("title", anime_title)
+                    if anime_id:
+                        link = f"[{official_title}](/anime/details/{anime_id})"
+                        print(f"DEBUG: Active search successful. Matched '{anime_title}' to '{official_title}'. Link: {link}")
+                        return link
+
+        print(f"DEBUG: Active search for details page failed for '{anime_title}'.")
+        return None
 
     @staticmethod
-    def generate_llm_response(user_query: str) -> Generator[str, None, None]: # Changed return type to Generator
+    def _resolve_link(anime_title: str, context_docs: List[Dict]) -> str:
         """
-        Generates a response from the currently configured LLM in a streaming fashion.
-        Incorporates a basic "Lore Navigator" by searching embeddings.
-        Yields chunks of the LLM's response.
-
-        Args:
-            user_query (str): The user's input query.
-
-        Yields:
-            str: Chunks of the LLM's response text, including error messages if any.
+        Attempts to create a markdown link for an anime.
+        1. Checks context docs.
+        2. Performs an active API search for a details page.
+        3. As a fallback, creates a link to the site's search page.
         """
-        if not user_query:
-            yield "Error: Please provide a query for the LLM."
+        # 1. Check context first
+        normalized_title = ''.join(filter(str.isalnum, anime_title.lower()))
+        for doc in context_docs:
+            doc_metadata = doc.get("metadata", {})
+            doc_title = doc_metadata.get("title", "")
+            normalized_doc_title = ''.join(filter(str.isalnum, doc_title.lower()))
+            if doc_metadata.get("type") == "anime_details" and normalized_title in doc_title:
+                anime_id = doc_metadata.get("anime_id")
+                if anime_id:
+                    return f" [{doc_metadata.get('title', anime_title)}](/anime/details/{anime_id}) "
+
+        # 2. Perform a live API search for a details page
+        details_link = LLMController._create_link_from_active_search(anime_title)
+        if details_link:
+            return details_link
+
+        # 3. FALLBACK: Create a link to the search page
+        encoded_title = urllib.parse.quote(anime_title)
+        search_link = f" [{anime_title}](/search?keyword={encoded_title}) "
+        print(f"DEBUG: Fallback search link created for '{anime_title}': {search_link}")
+        return search_link
+
+    @staticmethod
+    def generate_llm_response(user_query: str, history: Optional[List[Dict]] = None) -> Generator[str, None, None]:
+        """
+        Orchestrates the generation system, now with conversational history.
+        """
+        # --- Format Conversation History ---
+        history_context = ""
+        if history:
+            formatted_history = []
+            for msg in history:
+                role = "User" if msg.get('sender') == 'user' else "Mushi"
+                formatted_history.append(f"{role}: {msg.get('text')}")
+            history_context = "\n\n---CONVERSATION HISTORY (FOR CONTEXT)---\n" + "\n".join(formatted_history) + "\n---END HISTORY---\n"
+
+        # --- RAG Context Retrieval (Same as before) ---
+        rag_context = ""
+        relevant_docs = []
+        # We embed the full conversation history plus the new query to get the most relevant context
+        full_query_for_embedding = f"{history_context}\n\n{user_query}"
+        user_query_embedding = global_ollama_embedder.embed_text(full_query_for_embedding)
+
+        if user_query_embedding:
+            relevant_docs = global_vector_store.similarity_search(user_query_embedding, top_k=5)
+            if relevant_docs:
+                rag_context = "\n\n---CONTEXT---\n" + "\n".join([doc.get('content', '') for doc in relevant_docs]) + "\n---END CONTEXT---\n"
+
+        # Combine history, RAG context, and the new query into the final prompt
+        prompt_with_context = f"{history_context}{rag_context}\n\nUser Query: {user_query}"
+
+        # --- Determine which LLM service to use ---
+        current_llm_key = Config.CURRENT_GENERATION_LLM
+        if current_llm_key.startswith("ollama"):
+            model_name = Config.OLLAMA_ANIME_MODEL_NAME if current_llm_key == "ollama_anime" else Config.OLLAMA_QWEN_MODEL_NAME
+            llm_service = OllamaLLMService(model_name=model_name)
+        else:
+            yield "Error: No valid LLM provider configured."
             return
 
-        current_llm = Config.CURRENT_GENERATION_LLM
-        print(f"DEBUG: Attempting to generate streaming response using LLM: {current_llm}")
+        # --- Single-Pass Hybrid Generation ---
+        hybrid_prompt = (
+            f"You are Mushi, an AI assistant. Use the CONVERSATION HISTORY and CONTEXT to answer the user's query. If the context is not relevant, use your general knowledge. "
+            f"When you mention any anime title, you MUST wrap it in the `[LINK: Full Anime Title]` command. "
+            f"When providing a list, you MUST use markdown bullet points and add a blank line between each item.\n"
+            f"{prompt_with_context}"
+        )
 
-        context_for_llm: str = "" # Initialize empty context
-
-        # --- Lore Navigator Integration ---
-        # Attempt to embed the user's query and find relevant lore
-        user_query_embedding = global_ollama_embedder.embed_text(user_query)
-        if user_query_embedding:
-            # Perform similarity search to find relevant documents (lore)
-            relevant_docs = global_vector_store.similarity_search(user_query_embedding, top_k=3)
-
-            if relevant_docs:
-                # Mushi will not explicitly mention "Lore Database" in her response
-                # The system prompt in ollama_llm_service.py handles this.
-                context_for_llm = "\n\nRelevant Information:\n"
-                for doc in relevant_docs:
-                    # Access 'content' and 'metadata' directly from the doc
-                    content_snippet = doc.get('content', 'No content available')
-                    source_info = doc.get('metadata', {}).get('source')
-
-                    context_for_llm += f"- {content_snippet}"
-                    if source_info:
-                        context_for_llm += f" (Source: {source_info})"
-                    context_for_llm += "\n"
-                print(f"DEBUG: Context for LLM:\n{context_for_llm}")
-            else:
-                print("DEBUG: No relevant documents found for user query.")
-        else:
-            print("DEBUG: Failed to embed user query for lore search.")
-
-        # Construct the prompt for the LLM
-        # The system prompt in OllamaLLMService.MUSHI_SYSTEM_PROMPT guides the LLM's behavior
-        # and explicitly tells it NOT to mention "lore database" or similar terms.
-        prompt_for_llm = user_query
-        if context_for_llm:
-            # Prepend the context to the user's query.
-            # The system prompt will instruct the LLM on how to use this context.
-            prompt_for_llm = f"{context_for_llm}\n\nUser Query: {user_query}"
-
-
-        # Determine which LLM service to use based on configuration
-        if current_llm == "gemini":
-            # NOTE: GeminiLLMService.generate_content currently returns a single string.
-            # To support streaming here, GeminiLLMService.generate_content would also need
-            # to be updated to be a generator yielding chunks. For now, it will yield
-            # the full response at once if Gemini is chosen, effectively not streaming.
-            # A proper streaming implementation for Gemini would involve changes in gemini_llm_service.py too.
-            print("DEBUG: Calling GeminiLLMService.generate_content (Non-Streaming for now)...")
-            response_text = GeminiLLMService.generate_content(prompt_for_llm)
-            if response_text.startswith("Error:"):
-                yield response_text
-            else:
-                yield response_text # Yield the full response as one chunk for now
-        elif current_llm == "ollama_anime": # Specific Ollama anime model
-            print("DEBUG: Calling OllamaLLMService.generate_content (Anime Model) for streaming...")
-            # This call now returns a generator, so we iterate and yield each chunk
-            for chunk in OllamaLLMService(model_name=Config.OLLAMA_ANIME_MODEL_NAME).generate_content(prompt_for_llm):
-                # If an error chunk is received, yield it and stop the generator
-                if chunk.startswith("Error:"):
-                    yield chunk
-                    return
+        response_generator = llm_service.stream_formatted_response(hybrid_prompt)
+        buffer = ""
+        for chunk in response_generator:
+            if chunk.startswith("Error:"):
                 yield chunk
+                return
+            buffer += chunk
+            while (match := re.search(r'\[LINK:\s*(.*?)\s*\]', buffer)):
+                text_before_command = buffer[:match.start()]
+                if text_before_command:
+                    yield text_before_command
 
-        elif current_llm == "ollama_qwen": # Specific Ollama Qwen model
-            print("DEBUG: Calling OllamaLLMService.generate_content (Qwen Model) for streaming...")
-            # This call now returns a generator, so we iterate and yield each chunk
-            for chunk in OllamaLLMService(model_name=Config.OLLAMA_QWEN_MODEL_NAME).generate_content(prompt_for_llm):
-                # If an error chunk is received, yield it and stop the generator
-                if chunk.startswith("Error:"):
-                    yield chunk
-                    return
-                yield chunk
-        else:
-            yield "Error: No valid LLM provider configured or selected for streaming."
+                anime_title_to_resolve = match.group(1).strip()
+                resolved_link_or_text = LLMController._resolve_link(anime_title_to_resolve, relevant_docs)
+                yield resolved_link_or_text
 
+                buffer = buffer[match.end():]
 
+        if buffer:
+            yield buffer
+
+    # --- START OF CHANGE ---
+    # REASON FOR CHANGE: The previous implementation only used the user's query (`context_text`)
+    # to generate suggestions. This caused the LLM to lose context on subsequent turns.
+    # The method now accepts a `conversation_context` dictionary containing both the
+    # user's query and Mushi's last response. This provides a much richer basis for
+    # generating relevant, contextual follow-up questions.
     @staticmethod
-    def suggest_followup_questions(context_text: str) -> Tuple[Dict[str, Any], int]: # Parameter renamed to context_text
+    def suggest_followup_questions(conversation_context: Dict[str, str]) -> Tuple[Dict[str, Any], int]:
         """
-        Suggests 3 concise, deeper follow-up questions based on the provided context_text (user's query).
-        Also, optionally suggests similar anime if a primary anime was discussed.
-        Returns a dictionary with 'suggested_questions' (list of strings) and 'similar_anime_note' (optional string).
+        Generates follow-up questions based on the last user query AND Mushi's response.
         """
-        if not context_text:
-            return {"suggested_questions": [], "similar_anime_note": None}, 200
+        user_query = conversation_context.get("user_query")
+        mushi_response = conversation_context.get("mushi_response")
+
+        if not user_query or not mushi_response:
+            return {"suggested_questions": []}, 200
 
         current_llm = Config.CURRENT_GENERATION_LLM
-        print(f"DEBUG: Attempting to generate suggested questions using LLM: {current_llm}")
 
-        # Enhanced prompt for deeper, strictly '|||'-separated questions and optional similar anime note
-        # This prompt is specific to generating questions and similar anime,
-        # so it doesn't need the full MUSHI_SYSTEM_PROMPT.
-        # The OllamaLLMService's generate_content already injects the system prompt.
+        # The new prompt explicitly includes both sides of the last conversation turn.
         question_generation_prompt = f"""
-Based on the following user query, generate 3 concise, insightful, and relevant follow-up questions.
-Each question MUST be distinct and encourage deeper exploration of the topic discussed.
+        Based on the following conversation turn:
+        USER ASKED: "{user_query}"
+        MUSHI ANSWERED: "{mushi_response}"
 
---- STRICT FORMATTING RULES ---
-1.  **Output ONLY 3 questions.**
-2.  **Separate each question ONLY with "|||".**
-3.  **NO prefixes, numbering, or introductory phrases WHATSOEVER.** This includes, but is not limited to, phrases like "Question 1", "Question 2", "Question Suggestion", "Here are some questions:", "Here's the thing,", "So,", "And here's what I found interesting,", "Consider these questions:", "Suggested questions:", or any bullet points/numbering.
-4.  **Each question must be a complete, direct sentence ending with a question mark.**
-
-Example of Expected Output for Questions: "What are the main abilities of Monkey D. Luffy?|||Who are the key antagonists in the early arcs of One Piece?|||How does the concept of Devil Fruits impact the world of One Piece?"
-
---- OPTIONAL: SIMILAR ANIME NOTE ---
-If the user query clearly relates to a specific anime title (e.g., "One Piece", "Naruto", "Attack on Titan"), you MUST also add a separate section at the very end of your response, wrapped in a markdown code block, exactly like this:
-```
-NOTE_SIMILAR_ANIME:
-- [Anime 1]
-- [Anime 2]
-- [Anime 3]
-```
-If no specific anime is clearly identifiable from the user query, completely omit the markdown code block.
-
-User Query:
-{context_text}
-
-Your Response (strictly adhere to rules above):
-"""
-        llm_raw_response: str | None = None
-        if current_llm == "gemini":
-            print("DEBUG: Calling GeminiLLMService.generate_content for suggested questions...")
-            llm_raw_response = GeminiLLMService.generate_content(question_generation_prompt)
-        elif current_llm == "ollama_anime": # Specific Ollama anime model
-            print("DEBUG: Calling OllamaLLMService.generate_content (Anime Model) for suggested questions...")
-            # For non-streaming endpoint, call generate_content and get the full string
-            llm_raw_response_generator = OllamaLLMService(model_name=Config.OLLAMA_ANIME_MODEL_NAME).generate_content(question_generation_prompt)
-            llm_raw_response = "".join(list(llm_raw_response_generator)) # Collect all parts
-        elif current_llm == "ollama_qwen": # Specific Ollama Qwen model
-            print("DEBUG: Calling OllamaLLMService.generate_content (Qwen Model) for suggested questions...")
-            # For non-streaming endpoint, call generate_content and get the full string
-            llm_raw_response_generator = OllamaLLMService(model_name=Config.OLLAMA_QWEN_MODEL_NAME).generate_content(question_generation_prompt)
-            llm_raw_response = "".join(list(llm_raw_response_generator)) # Collect all parts
+        Generate exactly 3 diverse and insightful follow-up questions that a user might ask next.
+        RULES: Output ONLY 3 questions, separated by "|||". DO NOT use numbering or bullet points.
+        EXAMPLE: What are some other anime with a complex magic system?|||How does the power scaling in that anime compare to others?|||Are there any characters who question the morality of the magic system?
+        """
+        llm_raw_response: Optional[str] = None
+        if current_llm.startswith("ollama"):
+            model_name = Config.OLLAMA_ANIME_MODEL_NAME if current_llm == "ollama_anime" else Config.OLLAMA_QWEN_MODEL_NAME
+            llm_service = OllamaLLMService(model_name=model_name)
+            llm_raw_response = llm_service.get_simple_response(question_generation_prompt)
         else:
-            return {"suggested_questions": [], "similar_anime_note": "Error: No valid LLM provider configured for question suggestion."}, 500
+            return {"error": "Suggestion generation is currently only supported for Ollama providers."}, 500
 
-        if llm_raw_response is None or llm_raw_response.startswith("Error:"):
-            error_message = llm_raw_response if llm_raw_response else "No content returned for suggested questions."
-            print(f"LLM Error for suggested questions from service '{current_llm}': {error_message}")
-            return {"suggested_questions": [], "similar_anime_note": error_message}, 500 # Propagate service-specific errors
-        else:
-            # Parse the response: separate questions from the optional note
-            suggested_questions_part = llm_raw_response
-            similar_anime_note: Optional[str] = None
+        if not llm_raw_response or llm_raw_response.startswith("Error:"):
+            return {"error": llm_raw_response or "Failed to generate suggestions."}, 500
 
-            # Use regex to find the code block containing NOTE_SIMILAR_ANIME:
-            # This regex looks for a markdown code block starting with `NOTE_SIMILAR_ANIME:`
-            match = re.search(r'```(?:.*?)\s*NOTE_SIMILAR_ANIME:\s*\n(.*?)\n```', llm_raw_response, re.DOTALL)
-
-            if match:
-                similar_anime_content = match.group(1).strip()
-                # Frontend expects "Similar anime: " followed by the content.
-                # The code block ensures it's readable.
-                similar_anime_note = f"Similar anime: \n```\n{similar_anime_content}\n```"
-
-                # Remove the entire code block from the original response to get just the questions part
-                suggested_questions_part = re.sub(r'```(?:.*?)\s*NOTE_SIMILAR_ANIME:.*?\n```', '', llm_raw_response, flags=re.DOTALL).strip()
-
-            # Split questions using the "|||" delimiter
-            questions = [q.strip() for q in suggested_questions_part.split('|||') if q.strip()]
-
-            # Ensure questions are clean (remove stray punctuation at the end)
-            final_questions = [q.rstrip('.?!') for q in questions if q.strip()]
-
-            # Limit to top 3 questions
-            final_questions = final_questions[:3]
-
-            response_data = {
-                "suggested_questions": final_questions,
-                "similar_anime_note": similar_anime_note
-            }
-            print(f"LLM Response Generated Successfully for suggested questions: {response_data}")
-            return response_data, 200
+        questions = [q.strip() for q in llm_raw_response.split('|||') if q.strip()]
+        cleaned_questions = [re.sub(r'^\s*[-*]?\s*\d*\.\s*', '', q) for q in questions]
+        return {"suggested_questions": cleaned_questions[:3]}, 200
+    # --- END OF CHANGE ---

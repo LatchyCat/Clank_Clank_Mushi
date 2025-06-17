@@ -25,13 +25,13 @@ class VectorStore:
 
     def add_document(self, content: str, embedding: List[float], metadata: Optional[Dict] = None, source_item_id: Optional[str] = None):
         """
-        Adds a document to the vector store.
+        Adds a document to the vector store, checking for duplicates by source_item_id.
 
         Args:
             content (str): The original text content of the document.
             embedding (List[float]): The embedding vector of the content.
             metadata (Optional[Dict]): Optional dictionary of additional metadata for the document.
-            source_item_id (Optional[str]): A unique identifier from the original data source (e.g., aniwatch_id, ann_id).
+            source_item_id (Optional[str]): A unique identifier from the original data source to prevent duplicates.
         """
         # Ensure embedding is a numpy array for consistent operations
         if not isinstance(embedding, np.ndarray):
@@ -39,10 +39,9 @@ class VectorStore:
 
         # Check for duplicate source_item_id to prevent re-embedding the same item
         if source_item_id:
-            for doc in self.documents:
-                if doc.get("source_item_id") == source_item_id:
-                    logger.debug(f"VectorStore: Document with source_item_id '{source_item_id}' already exists. Skipping.")
-                    return
+            if any(doc.get("source_item_id") == source_item_id for doc in self.documents):
+                logger.debug(f"VectorStore: Document with source_item_id '{source_item_id}' already exists. Skipping.")
+                return
 
         document = {
             "id": self.next_id,

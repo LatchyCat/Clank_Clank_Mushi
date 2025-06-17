@@ -1,7 +1,7 @@
 # backend/services/anime_api_service.py
 import requests
 import logging
-import json # Import json for pretty printing in logs
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,16 @@ class AnimeAPIService:
         logger.info(f"AnimeAPIService: Searching anime for query: '{query}', page: {page}")
         params = {"keyword": query, "page": page}
         return self._make_request("/api/search", params=params)
+
+    # --- THIS IS THE NEWLY ADDED METHOD ---
+    def get_search_suggestions(self, keyword: str) -> tuple[dict, int]:
+        """
+        Fetches search suggestions from the anime API.
+        Corresponds to /api/search/suggest in the Node.js API.
+        """
+        logger.info(f"AnimeAPIService: Fetching search suggestions for keyword: '{keyword}'")
+        params = {"keyword": keyword}
+        return self._make_request("/api/search/suggest", params=params)
 
     def get_anime_info(self, anime_id: str) -> tuple[dict, int]:
         logger.info(f"AnimeAPIService: Fetching comprehensive info for anime ID: {anime_id} using /api/info.")
