@@ -6,11 +6,6 @@ llm_api_bp = Blueprint('llm_api', __name__, url_prefix='/api/llm')
 
 @llm_api_bp.route('/chat', methods=['POST'])
 def chat_with_llm():
-    """
-    API endpoint for sending user queries to the configured LLM (Mushi).
-    Expects a JSON body with a 'query' field and an optional 'history' field.
-    Returns a streaming response.
-    """
     data = request.get_json()
     user_query = data.get('query')
     history = data.get('history', [])
@@ -19,7 +14,20 @@ def chat_with_llm():
         return jsonify({"error": "Missing 'query' field in request body."}), 400
 
     response_generator = LLMController.generate_llm_response(user_query, history)
-    return Response(stream_with_context(response_generator), mimetype='text/event-stream')
+    return Response(stream_with_context(response_generator), mimetype='application/x-ndjson')
+
+@llm_api_bp.route('/resolve-link', methods=['POST'])
+def resolve_link_route():
+    """
+    A new dedicated endpoint to resolve an anime title into a URL.
+    """
+    data = request.get_json()
+    anime_title = data.get('title')
+    if not anime_title:
+        return jsonify({"error": "Missing 'title' field in request body."}), 400
+
+    response_data, status_code = LLMController.resolve_link_data(anime_title)
+    return jsonify(response_data), status_code
 
 @llm_api_bp.route('/providers', methods=['GET'])
 def get_llm_providers_route():
@@ -39,10 +47,6 @@ def get_current_llm_provider_route():
 
 @llm_api_bp.route('/suggest-questions', methods=['POST'])
 def suggest_questions_route():
-    """
-    API endpoint to generate suggested questions based on the last conversation turn.
-    Expects a JSON body with 'user_query' and 'mushi_response'.
-    """
     conversation_context = request.get_json()
     if not conversation_context:
         return jsonify({"error": "Missing JSON request body"}), 400
