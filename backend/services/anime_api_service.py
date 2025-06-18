@@ -55,12 +55,19 @@ class AnimeAPIService:
         params = {"keyword": query, "page": page}
         return self._make_request("/api/search", params=params)
 
-    # --- THIS IS THE NEWLY ADDED METHOD ---
+    # --- START OF FIX: Add the missing function ---
+    def get_estimated_schedules(self, date: str) -> tuple[dict, int]:
+        """
+        Fetches estimated schedules for anime from the API.
+        Corresponds to /api/schedule?date={date} in the Node.js API.
+        """
+        logger.info(f"AnimeAPIService: Fetching estimated schedules for date: '{date}'")
+        endpoint = "/api/schedule"
+        params = {"date": date}
+        return self._make_request(endpoint, params)
+    # --- END OF FIX ---
+
     def get_search_suggestions(self, keyword: str) -> tuple[dict, int]:
-        """
-        Fetches search suggestions from the anime API.
-        Corresponds to /api/search/suggest in the Node.js API.
-        """
         logger.info(f"AnimeAPIService: Fetching search suggestions for keyword: '{keyword}'")
         params = {"keyword": keyword}
         return self._make_request("/api/search/suggest", params=params)
@@ -95,7 +102,7 @@ class AnimeAPIService:
     def get_characters_list(self, anime_id: str, page: int = 1) -> tuple[dict, int]:
         logger.info(f"AnimeAPIService: Fetching characters list for anime ID: {anime_id}, page: {page}")
         params = {"page": page}
-        return self._make_request(f"/api/characters/{anime_id}", params=params)
+        return self._make_request(f"/api/character/list/{anime_id}")
 
     def get_related_anime(self, anime_id: str) -> tuple[dict, int]:
         logger.info(f"AnimeAPIService: Fetching related anime for anime ID: {anime_id}")

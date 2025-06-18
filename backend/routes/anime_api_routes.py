@@ -32,7 +32,6 @@ def get_home_data_route():
     data, status_code = anime_controller.get_home_page_data()
     return jsonify(data), status_code
 
-# FIX: Add the new route for top searches
 @anime_api_bp.route('/top-search', methods=['GET'])
 def get_top_search_route():
     logger.info("API Request: /api/anime/top-search")
@@ -98,8 +97,10 @@ def get_voice_actor_details_route(actor_id: str):
     data, status_code = anime_controller.get_voice_actor_details_data(actor_id)
     return jsonify(data), status_code
 
-@anime_api_bp.route('/qtip/<int:qtip_id>', methods=['GET'])
-def get_qtip_info_route(qtip_id: int):
+# --- START OF FIX: Change route to accept string instead of int ---
+@anime_api_bp.route('/qtip/<string:qtip_id>', methods=['GET'])
+def get_qtip_info_route(qtip_id: str):
     logger.info(f"API Request: /api/anime/qtip/{qtip_id}")
     data, status_code = anime_controller.get_qtip_info_data(qtip_id)
     return jsonify(data), status_code
+# --- END OF FIX ---
