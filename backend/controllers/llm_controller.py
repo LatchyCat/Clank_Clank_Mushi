@@ -80,7 +80,6 @@ class LLMController:
         """
         Orchestrates the generation system, now with conversational history.
         """
-        # --- Format Conversation History ---
         history_context = ""
         if history:
             formatted_history = []
@@ -89,10 +88,8 @@ class LLMController:
                 formatted_history.append(f"{role}: {msg.get('text')}")
             history_context = "\n\n---CONVERSATION HISTORY (FOR CONTEXT)---\n" + "\n".join(formatted_history) + "\n---END HISTORY---\n"
 
-        # --- RAG Context Retrieval (Same as before) ---
         rag_context = ""
         relevant_docs = []
-        # We embed the full conversation history plus the new query to get the most relevant context
         full_query_for_embedding = f"{history_context}\n\n{user_query}"
         user_query_embedding = global_ollama_embedder.embed_text(full_query_for_embedding)
 
@@ -101,10 +98,8 @@ class LLMController:
             if relevant_docs:
                 rag_context = "\n\n---CONTEXT---\n" + "\n".join([doc.get('content', '') for doc in relevant_docs]) + "\n---END CONTEXT---\n"
 
-        # Combine history, RAG context, and the new query into the final prompt
         prompt_with_context = f"{history_context}{rag_context}\n\nUser Query: {user_query}"
 
-        # --- Determine which LLM service to use ---
         current_llm_key = Config.CURRENT_GENERATION_LLM
         if current_llm_key.startswith("ollama"):
             model_name = Config.OLLAMA_ANIME_MODEL_NAME if current_llm_key == "ollama_anime" else Config.OLLAMA_QWEN_MODEL_NAME
@@ -113,7 +108,6 @@ class LLMController:
             yield "Error: No valid LLM provider configured."
             return
 
-        # --- Single-Pass Hybrid Generation ---
         hybrid_prompt = (
             f"You are Mushi, an AI assistant. Use the CONVERSATION HISTORY and CONTEXT to answer the user's query. If the context is not relevant, use your general knowledge. "
             f"When you mention any anime title, you MUST wrap it in the `[LINK: Full Anime Title]` command. "
@@ -128,7 +122,11 @@ class LLMController:
                 yield chunk
                 return
             buffer += chunk
-            while (match := re.search(r'\[LINK:\s*(.*?)\s*\]', buffer)):
+            # --- START OF CHANGE ---
+            # The regex now includes an optional backslash `\\?` to handle cases
+            # where the LLM escapes the opening bracket, e.g., \[LINK: ...].
+            while (match := re.search(r'\\?\[LINK:\s*(.*?)\s*\]', buffer)):
+            # --- END OF CHANGE ---
                 text_before_command = buffer[:match.start()]
                 if text_before_command:
                     yield text_before_command
@@ -142,12 +140,6 @@ class LLMController:
         if buffer:
             yield buffer
 
-    # --- START OF CHANGE ---
-    # REASON FOR CHANGE: The previous implementation only used the user's query (`context_text`)
-    # to generate suggestions. This caused the LLM to lose context on subsequent turns.
-    # The method now accepts a `conversation_context` dictionary containing both the
-    # user's query and Mushi's last response. This provides a much richer basis for
-    # generating relevant, contextual follow-up questions.
     @staticmethod
     def suggest_followup_questions(conversation_context: Dict[str, str]) -> Tuple[Dict[str, Any], int]:
         """
@@ -161,7 +153,6 @@ class LLMController:
 
         current_llm = Config.CURRENT_GENERATION_LLM
 
-        # The new prompt explicitly includes both sides of the last conversation turn.
         question_generation_prompt = f"""
         Based on the following conversation turn:
         USER ASKED: "{user_query}"
@@ -185,4 +176,3 @@ class LLMController:
         questions = [q.strip() for q in llm_raw_response.split('|||') if q.strip()]
         cleaned_questions = [re.sub(r'^\s*[-*]?\s*\d*\.\s*', '', q) for q in questions]
         return {"suggested_questions": cleaned_questions[:3]}, 200
-    # --- END OF CHANGE ---

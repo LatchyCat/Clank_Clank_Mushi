@@ -39,15 +39,16 @@ def get_current_llm_provider_route():
 
 @llm_api_bp.route('/suggest-questions', methods=['POST'])
 def suggest_questions_route():
-    # --- START OF CHANGE ---
-    # REASON FOR CHANGE: Previously, this route expected a single 'content' string.
-    # It now expects a full JSON object containing the conversation context.
-    # We get the entire JSON payload and pass it directly to the controller,
-    # which now knows how to handle this richer dictionary structure.
+    """
+    API endpoint to generate suggested questions based on the last conversation turn.
+    Expects a JSON body with 'user_query' and 'mushi_response'.
+    """
     conversation_context = request.get_json()
     if not conversation_context:
         return jsonify({"error": "Missing JSON request body"}), 400
 
+    if "user_query" not in conversation_context or "mushi_response" not in conversation_context:
+        return jsonify({"error": "Request body must contain 'user_query' and 'mushi_response' fields."}), 400
+
     suggested_data, status_code = LLMController.suggest_followup_questions(conversation_context)
-    # --- END OF CHANGE ---
     return jsonify(suggested_data), status_code
