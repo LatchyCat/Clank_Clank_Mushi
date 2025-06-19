@@ -14,6 +14,7 @@ function WebSearch() {
         debouncedValue,
         suggestionRef,
         handleBlur,
+        clearSearch
     } = useSearch();
 
     const handleSearchSubmit = () => {
@@ -46,7 +47,7 @@ function WebSearch() {
             </div>
             {isFocused && debouncedValue && (
                 <div ref={suggestionRef}>
-                    <Suggestion keyword={debouncedValue} />
+                    <Suggestion keyword={debouncedValue} onSuggestionClick={clearSearch} />
                 </div>
             )}
         </div>

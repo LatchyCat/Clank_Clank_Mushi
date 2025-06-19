@@ -1,3 +1,4 @@
+// mushi-frontend/src/components/categorycard/CategoryCard.jsx
 import React, { useCallback, useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -9,8 +10,6 @@ import { FaChevronRight } from "react-icons/fa";
 import "./CategoryCard.css";
 import { useLanguage } from "@/context/LanguageContext";
 import { Link, useNavigate } from "react-router-dom";
-import Qtip from "@/components/qtip/Qtip";
-import useToolTipPosition from "@/components/hooks/useToolTipPosition";
 
 const CategoryCard = React.memo(
   ({
@@ -22,10 +21,13 @@ const CategoryCard = React.memo(
     cardStyle,
     path,
     limit,
+    cardRefs, // Receives the refs object
+    onMouseEnter,
+    onMouseLeave,
   }) => {
     const { language } = useLanguage();
     const navigate = useNavigate();
-    const [showPlay, setShowPlay] = useState(false);
+
     if (limit) {
       data = data.slice(0, limit);
     }
@@ -49,285 +51,107 @@ const CategoryCard = React.memo(
     }, [categoryPage, data]);
 
     useEffect(() => {
-      const handleResize = () => {
-        setItemsToRender(getItemsToRender());
-      };
-      const newItems = getItemsToRender();
-      setItemsToRender((prev) => {
-        if (
-          JSON.stringify(prev.firstRow) !== JSON.stringify(newItems.firstRow) ||
-          JSON.stringify(prev.remainingItems) !==
-            JSON.stringify(newItems.remainingItems)
-        ) {
-          return newItems;
-        }
-        return prev;
-      });
-
+      const handleResize = () => setItemsToRender(getItemsToRender());
+      handleResize();
       window.addEventListener("resize", handleResize);
-      return () => {
-        window.removeEventListener("resize", handleResize);
-      };
+      return () => window.removeEventListener("resize", handleResize);
     }, [getItemsToRender]);
-    const [hoveredItem, setHoveredItem] = useState(null);
-    const [hoverTimeout, setHoverTimeout] = useState(null);
-    const { tooltipPosition, tooltipHorizontalPosition, cardRefs } =
-      useToolTipPosition(hoveredItem, data);
-    const handleMouseEnter = (item, index) => {
-      const timeout = setTimeout(() => {
-        setHoveredItem(item.id + index);
-        setShowPlay(true);
-      }, 400);
-      setHoverTimeout(timeout);
+
+    const renderCardDetails = (item) => {
+      const type = item.show_type || item.tvInfo?.showType;
+      const duration = item.duration || item.tvInfo?.duration;
+      const cleanDuration = duration && duration !== 'm' && duration !== '?' ? duration : null;
+
+      if (!type && !cleanDuration) return null;
+
+      return (
+        <div className="flex items-center gap-x-2 w-full mt-2 overflow-hidden text-gray-400 text-sm">
+          {type && <div className="text-nowrap overflow-hidden text-ellipsis capitalize">{type.split(" ").shift()}</div>}
+          {type && cleanDuration && <div className="dot"></div>}
+          {cleanDuration && <div className="text-nowrap overflow-hidden text-ellipsis">{cleanDuration}</div>}
+        </div>
+      );
     };
-    const handleMouseLeave = () => {
-      clearTimeout(hoverTimeout);
-      setHoveredItem(null);
-      setShowPlay(false);
+
+    const renderCard = (item, isFirstRow) => {
+      const imageHeightClass = isFirstRow
+        ? 'h-[320px] max-[1200px]:h-[35vw] max-[758px]:h-[45vw] max-[478px]:h-[60vw] ultra-wide:h-[400px]'
+        : 'h-[250px] max-[1200px]:h-[35vw] max-[758px]:h-[45vw] max-[478px]:h-[60vw]';
+
+      return (
+        <div
+          key={item.id}
+          className="flex flex-col transition-transform duration-300 ease-in-out h-fit"
+          ref={(el) => (cardRefs.current[item.id] = el)}
+          onMouseEnter={() => onMouseEnter(item.id, cardRefs.current[item.id])}
+          onMouseLeave={onMouseLeave}
+        >
+          <div
+            className="w-full relative group hover:cursor-pointer"
+            onClick={() => navigate(`/anime/details/${item.id}`)}
+          >
+            <div className="absolute inset-0 bg-black/20 group-hover:bg-black/40 transition-colors z-[1] flex items-center justify-center">
+                <FontAwesomeIcon icon={faPlay} className="text-4xl text-white opacity-0 group-hover:opacity-100 transition-opacity" />
+            </div>
+            <div className="overlay"></div>
+            <div className="overflow-hidden">
+              <img
+                src={`https://wsrv.nl/?url=${item.poster_url || item.poster}`}
+                alt={item.title}
+                className={`w-full object-cover transform transition-all duration-300 ease-in-out ${imageHeightClass} ${cardStyle}`}
+              />
+            </div>
+            {(item.tvInfo?.rating === "18+" || item?.adultContent === true) && (
+              <div className="text-white px-2 rounded-md bg-[#FF5700] absolute top-2 left-2 flex items-center justify-center text-[14px] font-bold z-10">18+</div>
+            )}
+            <div className="absolute left-2 bottom-4 flex items-center justify-center w-fit space-x-1 z-[100] max-[270px]:flex-col max-[270px]:gap-y-[3px]">
+              {item.tvInfo?.sub && (
+                <div className="flex space-x-1 justify-center items-center bg-[#B0E3AF] rounded-[2px] px-[4px] text-black py-[2px]">
+                  <FontAwesomeIcon icon={faClosedCaptioning} className="text-[12px]" />
+                  <p className="text-[12px] font-bold">{item.tvInfo.sub}</p>
+                </div>
+              )}
+              {item.tvInfo?.dub && (
+                <div className="flex space-x-1 justify-center items-center bg-[#B9E7FF] rounded-[2px] px-[8px] text-black py-[2px]">
+                  <FontAwesomeIcon icon={faMicrophone} className="text-[12px]" />
+                  <p className="text-[12px] font-bold">{item.tvInfo.dub}</p>
+                </div>
+              )}
+            </div>
+          </div>
+          <Link
+            to={`/anime/details/${item.id}`}
+            className="text-white font-semibold mt-1 item-title hover:text-[#FFBADE] hover:cursor-pointer line-clamp-1"
+          >
+            {language === "EN" ? item.title : (item.jname || item.japanese_title)}
+          </Link>
+          {isFirstRow && item.description && (
+            <div className="line-clamp-3 text-[13px] font-extralight text-[#b1b0b0] max-[1200px]:hidden">{item.description}</div>
+          )}
+          {renderCardDetails(item)}
+        </div>
+      );
     };
+
     return (
       <div className={`w-full ${className}`}>
-        <div className="flex items-center justify-between">
-          <h1 className="font-bold text-2xl text-[#ffbade] max-[478px]:text-[18px] capitalize">
-            {label}
-          </h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="font-bold text-2xl text-[#ffbade] max-[478px]:text-[18px] capitalize">{label}</h1>
           {showViewMore && (
-            <Link
-              to={`/${path}`}
-              className="flex w-fit items-baseline h-fit rounded-3xl gap-x-1 group"
-            >
-              <p className="text-white text-[12px] font-semibold h-fit leading-0 group-hover:text-[#ffbade] transition-all ease-out">
-                View more
-              </p>
+            <Link to={path ? `/search?category=${path}&title=${encodeURIComponent(label)}` : '#'} className="flex w-fit items-baseline h-fit rounded-3xl gap-x-1 group">
+              <p className="text-white text-[12px] font-semibold h-fit leading-0 group-hover:text-[#ffbade] transition-all ease-out">View more</p>
               <FaChevronRight className="text-white text-[10px] group-hover:text-[#ffbade] transition-all ease-out" />
             </Link>
           )}
         </div>
         <>
           {categoryPage && (
-            <div
-              className={`grid grid-cols-4 gap-x-3 gap-y-8 transition-all duration-300 ease-in-out ${
-                categoryPage && itemsToRender.firstRow.length > 0
-                  ? "mt-8 max-[758px]:hidden"
-                  : ""
-              }`}
-            >
-              {itemsToRender.firstRow.map((item, index) => (
-                <div
-                  key={index}
-                  className="flex flex-col transition-transform duration-300 ease-in-out"
-                  style={{ height: "fit-content" }}
-                  ref={(el) => (cardRefs.current[index] = el)}
-                >
-                  <div
-                    className="w-full relative group hover:cursor-pointer"
-                    onClick={() =>
-                      navigate(
-                        `${
-                          path === "top-upcoming"
-                            ? `/${item.id}`
-                            : `/watch/${item.id}`
-                        }`
-                      )
-                    }
-                    onMouseEnter={() => handleMouseEnter(item, index)}
-                    onMouseLeave={handleMouseLeave}
-                  >
-                    {hoveredItem === item.id + index && showPlay && (
-                      <FontAwesomeIcon
-                        icon={faPlay}
-                        className="text-[40px] text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[10000]"
-                      />
-                    )}
-
-                    <div className="overlay"></div>
-                    <div className="overflow-hidden">
-                      <img
-                        src={`https://wsrv.nl/?url=${item.poster_url || item.poster}`}
-                        alt={item.title}
-                        className={`w-full h-[320px] object-cover max-[1200px]:h-[35vw] max-[758px]:h-[45vw] max-[478px]:h-[60vw] group-hover:blur-[7px] transform transition-all duration-300 ease-in-out ultra-wide:h-[400px] ${cardStyle}`}
-                      />
-                    </div>
-                    {(item.tvInfo?.rating === "18+" ||
-                      item?.adultContent === true) && (
-                      <div className="text-white px-2 rounded-md bg-[#FF5700] absolute top-2 left-2 flex items-center justify-center text-[14px] font-bold">
-                        18+
-                      </div>
-                    )}
-                    <div className="absolute left-2 bottom-3 flex items-center justify-center w-fit space-x-1 z-[100] max-[270px]:flex-col max-[270px]:gap-y-[3px]">
-                      {item.tvInfo?.sub && (
-                        <div className="flex space-x-1 justify-center items-center bg-[#B0E3AF] rounded-[2px] px-[4px] text-black py-[2px]">
-                          <FontAwesomeIcon
-                            icon={faClosedCaptioning}
-                            className="text-[12px]"
-                          />
-                          <p className="text-[12px] font-bold">
-                            {item.tvInfo.sub}
-                          </p>
-                        </div>
-                      )}
-                      {item.tvInfo?.dub && (
-                        <div className="flex space-x-1 justify-center items-center bg-[#B9E7FF] rounded-[2px] px-[8px] text-black py-[2px]">
-                          <FontAwesomeIcon
-                            icon={faMicrophone}
-                            className="text-[12px]"
-                          />
-                          <p className="text-[12px] font-bold">
-                            {item.tvInfo.dub}
-                          </p>
-                        </div>
-                      )}
-                      {item.tvInfo?.eps && (
-                        <div className="flex space-x-1 justify-center items-center bg-[#a9a6b16f] rounded-[2px] px-[8px] text-white py-[2px]">
-                          <p className="text-[12px] font-extrabold">
-                            {item.tvInfo.eps}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                    {hoveredItem === item.id + index &&
-                      window.innerWidth > 1024 && (
-                        <div
-                          className={`absolute ${tooltipPosition} ${tooltipHorizontalPosition} z-[100000] transform transition-all duration-300 ease-in-out ${
-                            hoveredItem === item.id + index
-                              ? "opacity-100 translate-y-0"
-                              : "opacity-0 translate-y-2"
-                          }`}
-                        >
-                          <Qtip id={item.id} />
-                        </div>
-                      )}
-                  </div>
-                  <Link
-                    to={`/anime/details/${item.id}`}
-                    className="text-white font-semibold mt-1 item-title hover:text-[#FFBADE] hover:cursor-pointer line-clamp-1"
-                  >
-                    {language === "EN" ? item.title : item.japanese_title}
-                  </Link>
-                  {item.description && (
-                    <div className="line-clamp-3 text-[13px] font-extralight text-[#b1b0b0] max-[1200px]:hidden">
-                      {item.description}
-                    </div>
-                  )}
-                  <div className="flex items-center gap-x-2 w-full mt-2 overflow-hidden">
-                    <div className="text-gray-400 text-[14px] text-nowrap overflow-hidden text-ellipsis">
-                      {item.tvInfo?.showType?.split(" ").shift() || item.show_type?.split(" ").shift()}
-                    </div>
-                    <div className="dot"></div>
-                    <div className="text-gray-400 text-[14px] text-nowrap overflow-hidden text-ellipsis">
-                      {item.tvInfo?.duration === "m" ||
-                      item.tvInfo?.duration === "?" ||
-                      item.duration === "m" ||
-                      item.duration === "?"
-                        ? "N/A"
-                        : item.tvInfo?.duration || item.duration || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              ))}
+            <div className={`grid grid-cols-4 gap-x-3 gap-y-8 transition-all duration-300 ease-in-out ${categoryPage && itemsToRender.firstRow.length > 0 ? "mt-8 max-[758px]:hidden" : ""}`}>
+              {itemsToRender.firstRow.map((item) => renderCard(item, true))}
             </div>
           )}
           <div className="grid grid-cols-6 gap-x-3 gap-y-8 mt-6 transition-all duration-300 ease-in-out max-[1400px]:grid-cols-4 max-[758px]:grid-cols-3 max-[478px]:grid-cols-2">
-            {itemsToRender.remainingItems.map((item, index) => (
-              <div
-                key={index}
-                className="flex flex-col transition-transform duration-300 ease-in-out"
-                style={{ height: "fit-content" }}
-                ref={(el) => (cardRefs.current[index] = el)}
-              >
-                <div
-                  className="w-full relative group hover:cursor-pointer"
-                  onClick={() =>
-                    navigate(
-                      `${
-                        path === "top-upcoming"
-                          ? `/anime/details/${item.id}`
-                          : `/watch/${item.id}`
-                      }`
-                    )
-                  }
-                  onMouseEnter={() => handleMouseEnter(item, index)}
-                  onMouseLeave={handleMouseLeave}
-                >
-                  {hoveredItem === item.id + index && showPlay && (
-                    <FontAwesomeIcon
-                      icon={faPlay}
-                      className="text-[40px] text-white absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-[10000]"
-                    />
-                  )}
-                  <div className="overlay"></div>
-                  <div className="overflow-hidden">
-                    <img
-                      src={`https://wsrv.nl/?url=${item.poster_url || item.poster}`}
-                      alt={item.title}
-                      className={`w-full h-[250px] object-cover max-[1200px]:h-[35vw] max-[758px]:h-[45vw] max-[478px]:h-[60vw] ${cardStyle} group-hover:blur-[7px] transform transition-all duration-300 ease-in-out `}
-                    />
-                  </div>
-                  {(item.tvInfo?.rating === "18+" ||
-                    item?.adultContent === true) && (
-                    <div className="text-white px-2 rounded-md bg-[#FF5700] absolute top-2 left-2 flex items-center justify-center text-[14px] font-bold">
-                      18+
-                    </div>
-                  )}
-                  <div className="absolute left-2 bottom-4 flex items-center justify-center w-fit space-x-1 z-[100] max-[270px]:flex-col max-[270px]:gap-y-[3px]">
-                    {item.tvInfo?.sub && (
-                      <div className="flex space-x-1 justify-center items-center bg-[#B0E3AF] rounded-[2px] px-[4px] text-black py-[2px]">
-                        <FontAwesomeIcon
-                          icon={faClosedCaptioning}
-                          className="text-[12px]"
-                        />
-                        <p className="text-[12px] font-bold">
-                          {item.tvInfo.sub}
-                        </p>
-                      </div>
-                    )}
-                    {item.tvInfo?.dub && (
-                      <div className="flex space-x-1 justify-center items-center bg-[#B9E7FF] rounded-[2px] px-[8px] text-black py-[2px]">
-                        <FontAwesomeIcon
-                          icon={faMicrophone}
-                          className="text-[12px]"
-                        />
-                        <p className="text-[12px] font-bold">
-                          {item.tvInfo.dub}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                  {hoveredItem === item.id + index &&
-                    window.innerWidth > 1024 && (
-                      <div
-                        className={`absolute ${tooltipPosition} ${tooltipHorizontalPosition} z-[100000] transform transition-all duration-300 ease-in-out ${
-                          hoveredItem === item.id + index
-                            ? "opacity-100 translate-y-0"
-                            : "opacity-0 translate-y-2"
-                        }`}
-                      >
-                        <Qtip id={item.id} />
-                      </div>
-                    )}
-                </div>
-                <Link
-                  to={`/anime/details/${item.id}`}
-                  className="text-white font-semibold mt-1 item-title hover:text-[#FFBADE] hover:cursor-pointer line-clamp-1"
-                >
-                  {language === "EN" ? item.title : item.japanese_title}
-                </Link>
-                <div className="flex items-center gap-x-2 w-full mt-2 overflow-hidden">
-                  <div className="text-gray-400 text-[14px] text-nowrap overflow-hidden text-ellipsis">
-                    {item.tvInfo?.showType?.split(" ").shift() || item.show_type?.split(" ").shift()}
-                  </div>
-                  <div className="dot"></div>
-                  <div className="text-gray-400 text-[14px] text-nowrap overflow-hidden text-ellipsis">
-                    {item.tvInfo?.duration === "m" ||
-                    item.tvInfo?.duration === "?" ||
-                    item.duration === "m" ||
-                    item.duration === "?"
-                      ? "N/A"
-                      : item.tvInfo?.duration || item.duration || "N/A"}
-                  </div>
-                </div>
-              </div>
-            ))}
+            {itemsToRender.remainingItems.map((item) => renderCard(item, false))}
           </div>
         </>
       </div>

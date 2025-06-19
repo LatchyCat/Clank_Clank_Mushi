@@ -1,90 +1,57 @@
-// mushi-frontend/src/components/llm/ProviderSelector.jsx
-import React, { useState, useEffect } from 'react';
-import { api } from '../../services/api'; // This correctly imports the 'api' object from its separate file
+// mushi-frontend/src/components/common/LLMInfoModal.jsx
+import React from 'react';
+import { X } from 'lucide-react';
 
-function ProviderSelector() {
-  const [providers, setProviders] = useState({});
-  // Initialize selectedProvider to the desired default ('ollama_anime').
-  // It will be updated by the API call if a different provider is currently active on the backend.
-  const [selectedProvider, setSelectedProvider] = useState('ollama_anime');
-  const [feedback, setFeedback] = useState('');
-  const [isLoading, setIsLoading] = useState(true); // New loading state
-
-  // Fetch the available providers and the current selected provider when the component mounts
-  useEffect(() => {
-    const fetchLLMInfo = async () => {
-      setIsLoading(true); // Start loading
-      try {
-        // Fetch all available providers
-        const providerData = await api.llm.getProviders();
-        setProviders(providerData);
-
-        // Fetch the currently selected provider from the backend
-        const currentProviderResponse = await api.llm.getCurrentProvider();
-
-        // If the backend successfully returns a current provider, use it.
-        // Otherwise, stick with our initial default ('ollama_anime').
-        if (currentProviderResponse && currentProviderResponse.current_provider) {
-          setSelectedProvider(currentProviderResponse.current_provider);
-        } else {
-          // If backend did not return a specific current provider,
-          // the component will remain at its initialized 'ollama_anime' state.
-          console.warn("Backend did not return a specific current LLM provider. Displaying initial default.");
-        }
-      } catch (error) {
-        console.error('Failed to load LLM providers or current provider:', error);
-        setFeedback('Failed to load LLM providers or current provider.');
-        // If there's an error fetching, the component will remain at its initialized 'ollama_anime' state.
-        // No explicit setSelectedProvider('ollama_anime') needed here as it's the initial state.
-      } finally {
-        setIsLoading(false); // End loading
-      }
-    };
-    fetchLLMInfo();
-  }, []); // Empty dependency array means this effect runs once on mount
-
-  const handleProviderChange = async (event) => {
-    const newProvider = event.target.value;
-    setSelectedProvider(newProvider); // Optimistically update UI
-    setFeedback('Setting provider...');
-    try {
-      const result = await api.llm.setProvider(newProvider);
-      setFeedback(result.message); // e.g., "LLM provider set to ollama_anime"
-    } catch (error) {
-      console.error('Failed to set LLM provider:', error);
-      setFeedback(`Error setting provider: ${error.message || 'Unknown error'}`);
-    }
-  };
+/**
+ * A modal that explains what an LLM is in the context of the Mushi app.
+ *
+ * @param {object} props
+ * @param {boolean} props.isOpen - Controls if the modal is visible.
+ * @param {() => void} props.onClose - Function to call to close the modal.
+ */
+function LLMInfoModal({ isOpen, onClose }) {
+  if (!isOpen) return null;
 
   return (
-    <div className="bg-white/5 p-4 rounded-xl shadow-lg mb-4 border border-white/10"> {/* Softened background, rounded, shadow, border */}
-      <label htmlFor="llm-provider" className="block text-sm font-medium text-gray-300 mb-2">
-        Choose LLM Provider
-      </label>
-      {isLoading ? (
-        <p className="text-gray-400">Loading providers...</p>
-      ) : (
-        <select
-          id="llm-provider"
-          value={selectedProvider}
-          onChange={handleProviderChange}
-          className="w-full bg-white/10 border border-white/20 rounded-lg p-2 text-white focus:ring-2 focus:ring-pink-500" // Softened background, border, focus ring
-          disabled={Object.keys(providers).length === 0}
+    // Overlay to dim the background
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-sm flex justify-center items-center z-[200]"
+      onClick={onClose}
+    >
+      {/* Modal Content */}
+      <div
+        className="relative bg-neutral-900 border border-purple-500/50 rounded-2xl p-8 max-w-2xl w-full m-4 shadow-2xl"
+        onClick={(e) => e.stopPropagation()} // Prevent closing when clicking inside modal
+      >
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 text-gray-400 hover:text-white hover:bg-white/10 rounded-full p-2"
+          aria-label="Close modal"
         >
-          {/* The "Select a provider" option is now less likely to be seen if selectedProvider defaults correctly.
-              It serves as a fallback if selectedProvider is somehow an empty string,
-              or if no options are available. */}
-          <option value="" disabled>Select a provider</option>
-          {Object.entries(providers).map(([key, name]) => (
-            <option key={key} value={key}>
-              {name}
-            </option>
-          ))}
-        </select>
-      )}
-      {feedback && <p className="text-xs text-gray-400 mt-2">{feedback}</p>}
+          <X size={24} />
+        </button>
+
+        <h2 className="text-3xl font-bold mb-4 bg-clip-text text-transparent bg-gradient-to-r from-pink-400 to-purple-400">
+          What is an LLM?
+        </h2>
+
+        <div className="text-gray-300 space-y-4">
+          <p>
+            An LLM, or **Large Language Model**, is the technology that powers Mushi's brain! Think of it as a very advanced AI that has been trained on a massive amount of text and data from all over the internet.
+          </p>
+          <p>
+            This training allows it to understand and generate human-like text, answer questions, summarize information, and even have creative conversations.
+          </p>
+          <p>
+            In our app, Mushi uses a special "fine-tuned" LLM, which means it has extra training focused specifically on anime and manga. This helps it give you more accurate and relevant answers about your favorite shows!
+          </p>
+          <p className="mt-6 text-sm text-purple-300">
+            When you see the option to choose a provider (like Gemini or Ollama), you're choosing which powerful AI engine Mushi should use to think. It's like picking which library Mushi should visit to find an answer for you!
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
 
-export default ProviderSelector;
+export default LLMInfoModal;

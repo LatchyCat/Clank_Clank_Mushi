@@ -11,32 +11,21 @@ class Config:
 
     # Ollama Configuration
     OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-
-    # --- START OF DEFINITIVE FIX: Restored correct model name ---
-    # Embedding model for converting text to vectors.
     OLLAMA_EMBEDDING_MODEL = "snowflake-arctic-embed2:latest"
-    # --- END OF DEFINITIVE FIX ---
-
-    # Define your specific generation model name here.
     OLLAMA_QWEN3_MODEL_NAME = "qwen3:4b"
-
-    # Set the default Ollama model for all services to use.
     OLLAMA_DEFAULT_GENERATION_MODEL = OLLAMA_QWEN3_MODEL_NAME
-
     OLLAMA_GEN_TIMEOUT = int(os.getenv("OLLAMA_GENERATION_TIMEOUT", 120))
 
-    # External Service URLs
-    ANN_API_BASE_URL = "https://www.animenewsnetwork.com/encyclopedia/api.php"
-    ONE_PIECE_API_BASE_URL = "https://api.api-onepiece.com/v2"
-    ANIWATCH_API_BASE_URL = os.getenv("ANIWATCH_API_BASE_URL", "http://localhost:4444")
+    # --- THIS LINE IS REMOVED (or commented out) ---
+    # ANIWATCH_API_BASE_URL = os.getenv("ANIWATCH_API_BASE_URL", "http://localhost:4444")
 
-    # The provider list now accurately reflects your available models.
+    ONE_PIECE_API_BASE_URL = "https://api.api-onepiece.com/v2"
+
     LLM_PROVIDERS = {
         "gemini": "Google Gemini (Cloud)",
-        "ollama_qwen3": "Ollama Qwen3 4B (Local)", # Simplified to one local provider
+        "ollama_qwen3": "Ollama Qwen3 4B (Local)",
     }
 
-    # Set the default LLM provider key to your Qwen3 model.
     CURRENT_GENERATION_LLM = os.getenv("DEFAULT_GENERATION_LLM", "ollama_qwen3")
 
     # Flask App Configuration

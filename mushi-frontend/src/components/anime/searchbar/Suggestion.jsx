@@ -1,11 +1,9 @@
 // src/components/anime/searchbar/Suggestion.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-
-// CORRECTED IMPORT
 import { api } from '@/services/api';
 
-function Suggestion({ keyword }) {
+function Suggestion({ keyword, onSuggestionClick }) {
   const [suggestions, setSuggestions] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -33,7 +31,7 @@ function Suggestion({ keyword }) {
 
   if (isLoading) {
     return (
-      <div className="absolute top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-lg p-4 text-center text-gray-400">
+      <div className="absolute top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-lg p-4 text-center text-gray-400 z-50">
         Mushi is searching...
       </div>
     );
@@ -44,13 +42,14 @@ function Suggestion({ keyword }) {
   }
 
   return (
-    <div className="absolute top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+    <div className="absolute top-full mt-1 w-full bg-gray-800 border border-gray-700 rounded-lg shadow-lg max-h-80 overflow-y-auto z-50">
       <ul className="divide-y divide-gray-700">
         {suggestions.map((anime) => (
           <li key={anime.id}>
             <Link
               to={`/anime/details/${anime.id}`}
               className="flex items-center gap-4 p-3 hover:bg-purple-600/50 transition-colors"
+              onClick={onSuggestionClick}
             >
               <img src={anime.poster_url} alt={anime.title} className="w-10 h-14 object-cover rounded-md flex-shrink-0" />
               <div className="flex-grow">

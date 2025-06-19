@@ -1,0 +1,12 @@
+{
+  "Missing Anime ID": {
+    "count": 8,
+    "examples": [
+      "ID: N/A, Details: Source: spotlights, Item: {'id': None, 'poster': 'https://cdn.noitatnemucod.net/thumbnail/1366x768/100/057cb045cb7c24b873776f9",
+      "ID: N/A, Details: Source: spotlights, Item: {'id': None, 'poster': 'https://cdn.noitatnemucod.net/thumbnail/1366x768/100/9289654b9b8cb55954b1657",
+      "ID: N/A, Details: Source: spotlights, Item: {'id': None, 'poster': 'https://cdn.noitatnemucod.net/thumbnail/1366x768/100/002df26a3cf47bd0d10d3d5",
+      "ID: N/A, Details: Source: spotlights, Item: {'id': None, 'poster': 'https://cdn.noitatnemucod.net/thumbnail/1366x768/100/e7fb3917d5e67faf85ec047",
+      "ID: N/A, Details: Source: spotlights, Item: {'id': None, 'poster': 'https://cdn.noitatnemucod.net/thumbnail/1366x768/100/0a6ab70365f96458c2789f4"
+    ]
+  }
+}

@@ -1,6 +1,5 @@
 # backend/routes/anime_api_routes.py
 from flask import Blueprint, jsonify, request
-# Import the global controller instance instead of the class
 from globals import global_anime_controller as anime_controller
 import logging
 
@@ -8,97 +7,81 @@ logger = logging.getLogger(__name__)
 
 anime_api_bp = Blueprint('anime_api', __name__, url_prefix='/api/anime')
 
+def handle_request(handler, **kwargs):
+    """Generic request handler to reduce boilerplate."""
+    try:
+        data, status_code = handler(**kwargs)
+        return jsonify(data), status_code
+    except Exception as e:
+        logger.error(f"Error in route {request.path}: {e}", exc_info=True)
+        return jsonify({"error": "An internal server error occurred"}), 500
+
+@anime_api_bp.route('/home', methods=['GET'])
+def get_home_data_route():
+    logger.info("API Request: GET /api/anime/home")
+    return handle_request(anime_controller.get_home_page_data)
+
+@anime_api_bp.route('/top-ten', methods=['GET'])
+def get_top_ten_anime_route():
+    logger.info("API Request: GET /api/anime/top-ten")
+    return handle_request(anime_controller.get_top_ten_anime_data)
+
+@anime_api_bp.route('/details/<string:anime_id>', methods=['GET'])
+def get_anime_details_route(anime_id: str):
+    logger.info(f"API Request: GET /api/anime/details/{anime_id}")
+    return handle_request(anime_controller.get_anime_details_data, anime_id=anime_id)
+
+@anime_api_bp.route('/episodes/<string:anime_id>', methods=['GET'])
+def get_episodes_list_route(anime_id: str):
+    logger.info(f"API Request: GET /api/anime/episodes/{anime_id}")
+    return handle_request(anime_controller.get_episode_list_data, anime_id=anime_id)
+
+@anime_api_bp.route('/servers/<string:episode_data_id>', methods=['GET'])
+def get_available_servers_route(episode_data_id: str):
+    logger.info(f"API Request: GET /api/anime/servers/{episode_data_id}")
+    return handle_request(anime_controller.get_available_servers_data, episode_data_id=episode_data_id)
+
+@anime_api_bp.route('/stream', methods=['GET'])
+def get_streaming_info_route():
+    anime_id = request.args.get('animeId')
+    episode_data_id = request.args.get('id')
+    server_name = request.args.get('server')
+    stream_type = request.args.get('type')
+
+    if not all([anime_id, episode_data_id, server_name, stream_type]):
+        return jsonify({"error": "Missing 'animeId', 'id', 'server', or 'type' query parameters"}), 400
+
+    logger.info(f"API Request: GET /api/anime/stream with params: id={episode_data_id}, server={server_name}, type={stream_type}, animeId={anime_id}")
+
+    return handle_request(
+        anime_controller.get_streaming_info_data,
+        anime_id=anime_id,
+        episode_data_id=episode_data_id,
+        server_name=server_name,
+        stream_type=stream_type
+    )
+
+@anime_api_bp.route('/search', methods=['GET'])
+def search_anime_route():
+    filters = request.args.to_dict()
+    logger.info(f"API Request: GET /api/anime/search with filters: {filters}")
+    return handle_request(anime_controller.search_anime_data, filters=filters)
+
 @anime_api_bp.route('/search-suggestions', methods=['GET'])
 def get_search_suggestions_route():
     keyword = request.args.get('keyword')
     if not keyword:
         return jsonify({"error": "Missing 'keyword' query parameter"}), 400
-    logger.info(f"API Request: /api/anime/search-suggestions with keyword='{keyword}'")
-    data, status_code = anime_controller.get_search_suggestions_data(keyword)
-    return jsonify(data), status_code
+    logger.info(f"API Request: GET /api/anime/search-suggestions?keyword={keyword}")
+    return handle_request(anime_controller.get_search_suggestions_data, keyword=keyword)
 
-@anime_api_bp.route('/proxy-stream', methods=['GET'])
-def proxy_stream_route():
-    video_url = request.args.get('url')
-    referer = request.args.get('referer')
-    if not video_url:
-        return jsonify({"error": "Missing 'url' query parameter"}), 400
-    logger.info(f"API Request: /api/anime/proxy-stream for URL: {video_url} with Referer: {referer}")
-    return anime_controller.proxy_video_stream(video_url, referer=referer)
+@anime_api_bp.route('/qtip/<string:anime_id>', methods=['GET'])
+def get_qtip_info_route(anime_id: str):
+    logger.info(f"API Request: GET /api/anime/qtip/{anime_id}")
+    return handle_request(anime_controller.get_qtip_info_data, anime_id=anime_id)
 
-@anime_api_bp.route('/home', methods=['GET'])
-def get_home_data_route():
-    logger.info("API Request: /api/anime/home")
-    data, status_code = anime_controller.get_home_page_data()
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/top-search', methods=['GET'])
-def get_top_search_route():
-    logger.info("API Request: /api/anime/top-search")
-    data, status_code = anime_controller.get_top_search_anime_data()
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/top-ten', methods=['GET'])
-def get_top_ten_anime_route():
-    logger.info("API Request: /api/anime/top-ten")
-    data, status_code = anime_controller.get_top_ten_anime_data()
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/search', methods=['GET'])
-def search_anime_route():
-    query = request.args.get('q', default='', type=str)
-    page = request.args.get('page', default=1, type=int)
-    logger.info(f"API Request: /api/anime/search with query='{query}', page={page}")
-    data, status_code = anime_controller.search_anime_data(query, page)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/category/<path:category_slug>', methods=['GET'])
-def get_anime_by_category_route(category_slug: str):
-    page = request.args.get('page', default=1, type=int)
-    logger.info(f"API Request: /api/anime/category/{category_slug} with page={page}")
-    data, status_code = anime_controller.get_anime_by_category_data(category_slug, page)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/details/<string:anime_id>', methods=['GET'])
-def get_anime_details_route(anime_id: str):
-    logger.info(f"API Request: /api/anime/details/{anime_id}")
-    data, status_code = anime_controller.get_anime_details_data(anime_id)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/servers/<string:anime_id>', methods=['GET'])
-def get_available_servers_route(anime_id: str):
-    episode_data_id = request.args.get('ep')
-    if not episode_data_id:
-        return jsonify({"error": "Missing 'ep' query parameter for episode data ID"}), 400
-    logger.info(f"API Request: /api/anime/servers/{anime_id} with episode_data_id={episode_data_id}")
-    data, status_code = anime_controller.get_available_servers_data(anime_id, episode_data_id)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/stream', methods=['GET'])
-def get_streaming_info_route():
-    episode_id = request.args.get('id')
-    server_id = request.args.get('server')
-    stream_type = request.args.get('type', default='sub', type=str)
-    if not episode_id or not server_id:
-        return jsonify({"error": "Missing 'id' or 'server' query parameters"}), 400
-    logger.info(f"API Request: /api/anime/stream with episode_id={episode_id}, server_id={server_id}, stream_type={stream_type}")
-    data, status_code = anime_controller.get_streaming_info_data(episode_id, server_id, stream_type)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/character/<string:character_id>', methods=['GET'])
-def get_character_details_route(character_id: str):
-    logger.info(f"API Request: /api/anime/character/{character_id}")
-    data, status_code = anime_controller.get_character_details_data(character_id)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/actors/<string:actor_id>', methods=['GET'])
-def get_voice_actor_details_route(actor_id: str):
-    logger.info(f"API Request: /api/anime/actors/{actor_id}")
-    data, status_code = anime_controller.get_voice_actor_details_data(actor_id)
-    return jsonify(data), status_code
-
-@anime_api_bp.route('/qtip/<string:qtip_id>', methods=['GET'])
-def get_qtip_info_route(qtip_id: str):
-    logger.info(f"API Request: /api/anime/qtip/{qtip_id}")
-    data, status_code = anime_controller.get_qtip_info_data(qtip_id)
-    return jsonify(data), status_code
+@anime_api_bp.route('/category/<path:category>', methods=['GET'])
+def get_category_route(category):
+    page = request.args.get('page', 1, type=int)
+    logger.info(f"API Request: GET /api/anime/category/{category}?page={page}")
+    return handle_request(anime_controller.get_anime_by_category_data, category=category, page=page)

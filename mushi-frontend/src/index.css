@@ -20,46 +20,106 @@
   padding: 0;
   box-sizing: border-box;
 }
+
+/* --- START OF DEFINITIVE FIX --- */
 body {
   overflow-y: scroll;
+  /* This crucial property reserves space for the scrollbar, preventing any layout shift
+     when modals or other elements might temporarily hide it. */
+  scrollbar-gutter: stable;
 }
-.scrollbar-visible {
-  scrollbar-width: auto;
-  scrollbar-color: #888 #333;
+/* --- END OF DEFINITIVE FIX --- */
+
+
+/* Custom Scrollbar Styles */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 8px;
 }
-.scrollbar-visible::-webkit-scrollbar {
-  width: 20px;
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(120, 119, 198, 0.5);
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(120, 119, 198, 0.8);
 }
 
-.scrollbar-visible::-webkit-scrollbar-thumb {
-  background-color: #888;
-}
 
-.scrollbar-visible::-webkit-scrollbar-track {
-  background: black;
-}
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
 }
-::-webkit-scrollbar {
-  width: 16px;
-}
-
-::-webkit-scrollbar-track {
-  background: #23222c;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #65646a;
-}
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
-
+::-webkit-scrollbar {
+  width: 16px;
+}
+::-webkit-scrollbar-track {
+  background: #23222c;
+}
+::-webkit-scrollbar-thumb {
+  background: #65646a;
+}
 .is-visible {
   opacity: 1;
 }
+
+/* --- NEW CHAT WINDOW STYLES --- */
+
+/* Ensures the chat log itself is scrollable, fixing the scroll-lock issue */
+.chat-log-container {
+    overflow-y: auto;
+    /* Other styles are inherited, this is the key property */
+}
+
+/* More specific styling for markdown content to avoid global overrides */
+.markdown-content p {
+  font-size: 1rem; /* Reset font size to prevent weird scaling */
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  font-size: 1rem;
+  margin-left: 1.5rem; /* Indent lists */
+  margin-bottom: 1rem;
+}
+
+.markdown-content li {
+  margin-bottom: 1rem; /* This creates the nice spacing between list items */
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  font-size: 1.25rem; /* Consistent heading size */
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+}
+
+.markdown-content a {
+  /* Link styles are handled by the MarkdownLink component, but you can add fallbacks */
+  color: #f472b6; /* A nice pink fallback */
+  text-decoration: underline;
+}
+
+.dot {
+  width: 4px;
+  height: 4px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  display: inline-block;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -114,14 +174,4 @@ body {
     --chart-4: 280 65% 60%;
     --chart-5: 340 75% 55%;
   }
-}
-.dot {
-  width: 4px;
-  height: 4px;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
-  display: inline-block;
 }

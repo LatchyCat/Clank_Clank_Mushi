@@ -7,7 +7,6 @@ from services.anime_api_service import AnimeAPIService
 from controllers.anime_controller import AnimeController
 from config import Config
 
-# --- START OF THE DEFINITIVE FIX ---
 # Initialize services and controllers in the correct order
 
 # 1. Core services that don't depend on others
@@ -28,4 +27,3 @@ global_data_embedding_service = DataEmbeddingService(
 )
 
 print("DEBUG: globals.py: All global services and controllers initialized correctly.")
-# --- END OF THE DEFINITIVE FIX ---

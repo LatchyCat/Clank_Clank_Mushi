@@ -1,241 +1,232 @@
 // mushi-frontend/src/components/data/DataClusterViewer.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from '../../services/api'; // Correct path to api.js
-import * as THREE from 'three';
-import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'; // For interactive camera control
+import { api } from '../../services/api';
+import * as d3 from 'd3';
+import { useNavigate } from 'react-router-dom';
 
-/**
- * DataClusterViewer component fetches and displays clustered data documents
- * in a 3D visualization using Three.js.
- */
+const InspectorPanel = ({ node, onClose }) => {
+    if (!node) return null;
+    const navigate = useNavigate();
+
+    const handleViewDetails = () => {
+        if (node.id) {
+            navigate(`/anime/details/${node.id}`);
+        }
+    };
+
+    return (
+        <div className="absolute top-4 right-4 bg-neutral-900/80 backdrop-blur-md w-72 rounded-xl shadow-2xl border border-white/10 p-4 z-20 animate-[fadeIn_0.3s_ease-out]">
+            <button onClick={onClose} className="absolute top-2 right-2 text-gray-400 hover:text-white p-1 rounded-full">×</button>
+            <img src={node.poster} alt={node.name} className="w-full h-40 object-cover rounded-lg mb-3" />
+            <h3 className="font-bold text-lg text-white">{node.name}</h3>
+            {node.clusterTitle && <p className="text-sm text-gray-300">Cluster: <span style={{ color: node.clusterColor }}>{node.clusterTitle}</span></p>}
+            {node.id && (
+                <button onClick={handleViewDetails} className="mt-4 w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-2 px-4 rounded-lg transition-colors">
+                    View Details
+                </button>
+            )}
+        </div>
+    );
+};
+
 function DataClusterViewer() {
-  const mountRef = useRef(null); // Ref for the div where the Three.js scene will be mounted
-  const [clusteredData, setClusteredData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [numClusters, setNumClusters] = useState(5); // Default number of clusters
+    const svgRef = useRef(null);
+    const containerRef = useRef(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [isDataEmpty, setIsDataEmpty] = useState(false);
+    const [numClusters, setNumClusters] = useState('5');
+    const [triggerFetch, setTriggerFetch] = useState(5);
+    const [selectedNode, setSelectedNode] = useState(null);
+    const [loadingProgress, setLoadingProgress] = useState(0);
 
-  // Color palette for clusters (you can expand this for more clusters)
-  const clusterColors = [
-    0xff0000, 0x00ff00, 0x0000ff, 0xffff00, 0xff00ff, 0x00ffff, 0xff8800, 0x8800ff, 0x00ff88, 0x88ff00
-  ];
+    const clusterColors = [
+        '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0', '#9966FF',
+        '#FF9F40', '#EF4444', '#3B82F6', '#F59E0B', '#10B981', '#636e72', '#fd79a8'
+    ];
 
-  // --- Fetch Clustered Data ---
-  useEffect(() => {
-    const fetchClusteredData = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await api.data.getClusteredData(numClusters);
+    useEffect(() => {
+        const handler = setTimeout(() => {
+            const parsedNum = parseInt(numClusters);
+            if (!isNaN(parsedNum) && parsedNum >= 2 && parsedNum <= 12) {
+                setTriggerFetch(parsedNum);
+            }
+        }, 800);
+        return () => clearTimeout(handler);
+    }, [numClusters]);
 
-        if (data && data.clustered_documents) {
-          setClusteredData(data);
-          console.log(`Mushi found sparkling clustered data with ${numClusters} clusters, desu!~`, data);
-        } else {
-          setError(`Muu... Mushi couldn't fetch clustered data with ${numClusters} clusters. Gomen'nasai! (T_T)`);
+    useEffect(() => {
+        let isMounted = true;
+        const fetchDataAndDraw = async () => {
+            if (!isMounted) return;
+            setIsLoading(true);
+            setError(null);
+            setIsDataEmpty(false);
+            setSelectedNode(null);
+            setLoadingProgress(0);
+
+            const progressInterval = setInterval(() => {
+                setLoadingProgress(prev => Math.min(prev + 1, 95));
+            }, 300);
+
+            try {
+                // Fetch both data sources concurrently
+                const [homeDataResponse, clusterData] = await Promise.all([
+                    api.anime.getHomeData(),
+                    api.data.getClusteredData(triggerFetch)
+                ]);
+
+                if (!isMounted) return;
+                clearInterval(progressInterval);
+                setLoadingProgress(100);
+
+                if (clusterData.error) {
+                    if (clusterData.error.includes("not available yet")) {
+                        setIsDataEmpty(true);
+                    } else {
+                        setError(clusterData.error);
+                    }
+                    return;
+                }
+
+                const allAnime = [
+                    ...homeDataResponse.spotlights, ...homeDataResponse.trending,
+                    ...homeDataResponse.top_airing, ...homeDataResponse.most_popular,
+                    ...homeDataResponse.most_favorite,
+                ];
+                const uniqueAnime = [...new Map(allAnime.map(item => [item.id, item])).values()];
+
+                const { doc_id_to_label, cluster_info } = clusterData;
+
+                const nodes = [];
+                Object.keys(cluster_info).forEach(clusterIdStr => {
+                    const id = parseInt(clusterIdStr);
+                    nodes.push({
+                        id: `cluster-${id}`, type: 'cluster', name: cluster_info[id].title,
+                        size: 20 + (cluster_info[id]?.top_terms?.length || 0) * 5,
+                        color: clusterColors[id % clusterColors.length],
+                    });
+                });
+
+                const docNodes = uniqueAnime.map(anime => {
+                    const source_id = `anime_api_details_${anime.id}`;
+                    const clusterLabel = doc_id_to_label[source_id];
+
+                    const baseColor = d3.color(clusterLabel !== undefined ? clusterColors[clusterLabel % clusterColors.length] : "#555");
+                    // --- D3 BUG FIX: Use hsl() for color modification ---
+                    const modifiedColor = d3.hsl(baseColor);
+                    modifiedColor.s = clusterLabel !== undefined ? modifiedColor.s : 0; // Don't oversaturate
+                    modifiedColor.l = clusterLabel !== undefined ? modifiedColor.l + 0.1 : 0.4;
+                    // --- END OF BUG FIX ---
+
+                    return {
+                        id: anime.id, type: 'document', name: anime.title,
+                        poster: anime.poster_url || anime.poster, cluster: clusterLabel,
+                        color: modifiedColor.toString(), size: 5,
+                        clusterTitle: clusterLabel !== undefined ? cluster_info[clusterLabel].title : "Unclustered",
+                        clusterColor: baseColor.toString()
+                    };
+                });
+
+                nodes.push(...docNodes);
+                const links = docNodes
+                    .filter(doc => doc.cluster !== undefined)
+                    .map(doc => ({ source: doc.id, target: `cluster-${doc.cluster}` }));
+
+                if (!containerRef.current) return;
+                const { width, height } = containerRef.current.getBoundingClientRect();
+                const svg = d3.select(svgRef.current).html("").attr("viewBox", [-width / 2, -height / 2, width, height]);
+
+                const simulation = d3.forceSimulation(nodes)
+                    .force("link", d3.forceLink(links).id(d => d.id).strength(0.05).distance(40))
+                    .force("charge", d3.forceManyBody().strength(-40))
+                    .force("center", d3.forceCenter(0, 0))
+                    .force("x", d3.forceX().strength(0.02))
+                    .force("y", d3.forceY().strength(0.02))
+                    .force("collide", d3.forceCollide().radius(d => d.size + 4));
+
+                const g = svg.append("g");
+                const linkElements = g.append("g").attr("stroke", "#999").attr("stroke-opacity", 0.1).selectAll("line").data(links).join("line");
+                const nodeElements = g.append("g").selectAll("g.node").data(nodes, d => d.id).join("g").attr("class", "node").call(d3.drag().on("start", dragstarted).on("drag", dragged).on("end", dragended));
+
+                function dragstarted(event, d) { if (!event.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+                function dragged(event, d) { d.fx = event.x; d.fy = event.y; }
+                function dragended(event, d) { if (!event.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }
+
+                nodeElements.append("circle").attr("r", d => d.size).attr("fill", d => d.color);
+                nodeElements.filter(d => d.type === 'cluster').append("text")
+                    .text(d => d.name).attr("text-anchor", "middle").attr("dy", d => -(d.size + 5))
+                    .attr("fill", "#fff").attr("font-size", "14px").attr("font-weight", "bold")
+                    .attr("paint-order", "stroke").attr("stroke", "#111827").attr("stroke-width", "0.3em").style("pointer-events", "none");
+
+                nodeElements.on("click", (event, d) => { if (d.type === 'document') setSelectedNode(d); });
+                simulation.on("tick", () => {
+                    linkElements.attr("x1", d => d.source.x).attr("y1", d => d.source.y).attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+                    nodeElements.attr("transform", d => `translate(${d.x},${d.y})`);
+                });
+
+                const zoom = d3.zoom().scaleExtent([0.1, 8]).on("zoom", ({ transform }) => g.attr("transform", transform));
+                svg.call(zoom);
+
+            } catch (e) {
+                if(isMounted) {
+                    clearInterval(progressInterval);
+                    setError(e.message);
+                }
+            } finally {
+                if(isMounted) setIsLoading(false);
+            }
+        };
+
+        fetchDataAndDraw();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [triggerFetch]);
+
+    const renderOverlay = () => {
+        if (isLoading) {
+             return (
+                <div className="absolute inset-0 flex flex-col justify-center items-center text-indigo-300 text-lg bg-black/70 z-20 p-4 text-center">
+                    <p>Mushi is mapping the data constellations... ☆</p>
+                    <div className="w-1/2 max-w-sm mt-4 bg-gray-600 rounded-full h-2.5">
+                        <div className="bg-gradient-to-r from-teal-400 to-cyan-400 h-2.5 rounded-full" style={{ width: `${loadingProgress}%`, transition: 'width 0.5s ease-out' }}></div>
+                    </div>
+                    <p className="text-sm mt-2 text-gray-400">Loading pre-computed data. This should be quick!</p>
+                </div>
+            )
         }
-      } catch (err) {
-        console.error(`Uwaah! Failed to fetch clustered data with ${numClusters} clusters:`, err);
-        setError(`Mushi encountered an error while fetching clustered data: ${err.message || "Unknown error"} (>_<)`);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchClusteredData();
-  }, [numClusters]); // Re-run effect when numClusters changes
-
-  // --- Three.js Scene Setup ---
-  useEffect(() => {
-    if (!mountRef.current || isLoading || error || !clusteredData) return;
-
-    const currentMount = mountRef.current;
-    let scene, camera, renderer, controls;
-    let animationFrameId; // To store the ID of the animation frame
-
-    const initThree = () => {
-      // Scene
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x1a202c); // Dark background similar to Tailwind gray-900
-
-      // Camera
-      camera = new THREE.PerspectiveCamera(
-        75,
-        currentMount.clientWidth / currentMount.clientHeight,
-        0.1,
-        1000
-      );
-      camera.position.z = 50; // Move camera back to see objects
-
-      // Renderer
-      renderer = new THREE.WebGLRenderer({ antialias: true });
-      renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-      currentMount.appendChild(renderer.domElement);
-
-      // Controls (OrbitControls for interactive camera)
-      controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true; // An animation loop is required when damping is enabled
-      controls.dampingFactor = 0.05;
-
-      // Lights
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // Soft white light
-      scene.add(ambientLight);
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      directionalLight.position.set(0, 1, 1).normalize();
-      scene.add(directionalLight);
-
-      // --- Add 3D objects based on clustered data ---
-      const clusterCenters = new Map(); // To store the average position for each cluster
-      const clusterCounts = new Map(); // To store the number of documents in each cluster
-
-      // First, calculate bounding box of document positions within each cluster
-      // and determine average positions for initial cluster placement.
-      // For simplicity, we'll just place them randomly within a sphere for now.
-
-      const sphereRadius = 20; // Radius for distributing clusters
-
-      Object.entries(clusteredData.clustered_documents).forEach(([clusterId, documents]) => {
-        const clusterIndex = parseInt(clusterId, 10);
-        const color = new THREE.Color(clusterColors[clusterIndex % clusterColors.length]);
-
-        // Position clusters in a spherical arrangement
-        // For a more meaningful visualization, you'd use embedding positions.
-        // Here, we're just spreading them out for visual distinction.
-        const angle = (clusterIndex / numClusters) * Math.PI * 2;
-        const x = sphereRadius * Math.cos(angle);
-        const y = sphereRadius * Math.sin(angle);
-        const z = (Math.random() - 0.5) * 10; // Slight variation in Z
-
-        // Create a representative object for the cluster (e.g., a larger sphere)
-        const clusterGeometry = new THREE.SphereGeometry(1.5, 32, 32);
-        const clusterMaterial = new THREE.MeshPhongMaterial({ color: color, transparent: true, opacity: 0.7 });
-        const clusterMesh = new THREE.Mesh(clusterGeometry, clusterMaterial);
-        clusterMesh.position.set(x, y, z);
-        scene.add(clusterMesh);
-
-        // Add a label for the cluster (basic text geometry, more advanced options exist)
-        // This requires a font loader, which is more complex. For now, we'll skip 3D text.
-        // You can use a CSS2DRenderer for HTML-based labels.
-
-        // Place small spheres for each document within its cluster's vicinity
-        documents.forEach((doc, docIndex) => {
-          const docGeometry = new THREE.SphereGeometry(0.3, 16, 16);
-          const docMaterial = new THREE.MeshPhongMaterial({ color: color.clone().offsetHSL(0, 0, 0.2), flatShading: true }); // Lighter shade
-          const docMesh = new THREE.Mesh(docGeometry, docMaterial);
-
-          // Position documents randomly around their cluster center
-          const docOffsetX = (Math.random() - 0.5) * 5;
-          const docOffsetY = (Math.random() - 0.5) * 5;
-          const docOffsetZ = (Math.random() - 0.5) * 5;
-          docMesh.position.set(x + docOffsetX, y + docOffsetY, z + docOffsetZ);
-          scene.add(docMesh);
-
-          // You could store references to these meshes and
-          // attach data (e.g., doc.content) for interactivity (e.g., on click popups).
-        });
-      });
-
-      // Animation loop
-      const animate = () => {
-        animationFrameId = requestAnimationFrame(animate);
-        controls.update(); // only required if controls.enableDamping or controls.autoRotate are set to true
-        renderer.render(scene, camera);
-      };
-
-      animate();
-
-      // Handle window resize
-      const handleResize = () => {
-        camera.aspect = currentMount.clientWidth / currentMount.clientHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
-      };
-      window.addEventListener('resize', handleResize);
-
-      // Cleanup function
-      return () => {
-        cancelAnimationFrame(animationFrameId); // Stop the animation loop
-        window.removeEventListener('resize', handleResize);
-        if (currentMount) {
-          currentMount.removeChild(renderer.domElement);
+        if (isDataEmpty) {
+            return (
+                <div className="absolute inset-0 flex flex-col justify-center items-center text-center text-indigo-300 text-lg bg-black/50 z-20 p-4">
+                    <p>Mushi is still learning about the anime universe!</p>
+                    <p className="text-sm text-gray-400 mt-2">The database is being populated in the background. Please refresh in a few minutes.</p>
+                </div>
+            );
         }
-        renderer.dispose();
-        controls.dispose();
-        // Dispose of geometries and materials if created inside the loop for performance
-        scene.clear(); // Clear all objects from the scene
-      };
-    };
-
-    initThree();
-  }, [clusteredData, isLoading, error, numClusters]); // Re-initialize Three.js if data or parameters change
-
-  const handleNumClustersChange = (e) => {
-    const value = parseInt(e.target.value, 10);
-    if (!isNaN(value) && value > 0) {
-      setNumClusters(value);
-    } else if (e.target.value === '') {
-      setNumClusters(''); // Allow empty input temporarily
+        if (error) {
+            return <div className="absolute inset-0 flex justify-center items-center text-red-400 text-lg p-4 text-center z-20">{error}</div>
+        }
+        return null;
     }
-  };
 
-  if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-64 text-indigo-300 text-lg">
-        Mushi is organizing all the data into neat clusters for you, Senpai! Waku waku!~ ☆
-      </div>
+        <div className="p-4 bg-neutral-800/50 backdrop-blur-sm rounded-xl shadow-lg border border-purple-500/20">
+            <div ref={containerRef} className="w-full h-[80vh] rounded-lg bg-[#111827] relative overflow-hidden">
+                {renderOverlay()}
+                <svg ref={svgRef} className="w-full h-full"></svg>
+
+                <div className="absolute top-4 left-4 bg-neutral-900/70 backdrop-blur-sm p-4 rounded-lg shadow-lg w-72 z-20">
+                     <label htmlFor="numClusters" className="block text-gray-300 font-medium mb-2 text-center">Number of Clusters:</label>
+                     <input id="numClusters" type="number" min="2" max="10" value={numClusters}
+                            onChange={e => setNumClusters(e.target.value)}
+                            className="w-full p-2 rounded-md bg-gray-700 text-white text-center focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+                </div>
+                <InspectorPanel node={selectedNode} onClose={() => setSelectedNode(null)} />
+            </div>
+        </div>
     );
-  }
-
-  if (error) {
-    return (
-      <div className="text-red-400 text-center p-4 border border-red-500 rounded-lg">
-        Oh no! {error}
-      </div>
-    );
-  }
-
-  if (!clusteredData || !clusteredData.clustered_documents || Object.keys(clusteredData.clustered_documents).length === 0) {
-    return (
-      <div className="text-gray-400 text-center p-4">
-        Muu... No clustered data found to visualize. (T_T) Please ensure data is ingested.
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-6 bg-gray-900 text-gray-100 min-h-screen flex flex-col">
-      <h2 className="text-3xl font-extrabold text-white text-center mb-8">
-        Mushi's 3D Data Clusters! (ﾉ´ヮ´)ﾉ*:･ﾟ✧
-      </h2>
-
-      <div className="max-w-md mx-auto mb-8 p-4 bg-gray-800 rounded-lg shadow-lg flex items-center gap-4">
-        <label htmlFor="numClusters" className="text-gray-300 font-medium">Number of Clusters:</label>
-        <input
-          id="numClusters"
-          type="number"
-          min="1"
-          value={numClusters}
-          onChange={handleNumClustersChange}
-          className="w-24 p-2 rounded-md bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          aria-label="Number of clusters"
-        />
-      </div>
-
-      <div
-        ref={mountRef}
-        className="flex-grow bg-gray-800 rounded-lg shadow-lg overflow-hidden"
-        style={{ minHeight: '600px', width: '100%' }} // Ensure the canvas has space
-      >
-        {/* Three.js scene will be rendered inside this div */}
-      </div>
-
-      <div className="mt-8 text-center text-gray-400">
-        <p>Senpai, you can drag to rotate the 3D view and scroll to zoom! </p>
-        <p>Currently, clusters are randomly positioned for visibility. For true cluster visualization, you'd use the actual embedding vectors to determine their positions in 3D space, which would involve dimensionality reduction (e.g., PCA, t-SNE) if your embeddings are high-dimensional.</p>
-        <p>This is a foundational setup, and Mushi is excited to see what amazing visualizations you'll create!</p>
-      </div>
-    </div>
-  );
 }
 
 export default DataClusterViewer;

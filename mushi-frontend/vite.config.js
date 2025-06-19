@@ -11,4 +11,14 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      // Proxy API requests to the Flask backend
+      '/api': {
+        target: 'http://127.0.0.1:8001', // Your Flask backend URL
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })

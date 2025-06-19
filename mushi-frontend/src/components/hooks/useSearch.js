@@ -1,4 +1,4 @@
-// src/hooks/useSearch.js (NEW FILE)
+// src/hooks/useSearch.js
 import { useState, useRef } from 'react';
 import useDebounce from './useDebounce'; // Import our new debounce hook
 
@@ -9,16 +9,17 @@ export default function useSearch() {
 
   const suggestionRef = useRef(null);
 
-  // This function will be passed to the onBlur handler of the input
   const handleBlur = () => {
-    // We delay the blur event slightly to allow a click on the suggestion box
-    // to register before the input loses focus and hides the suggestions.
     setTimeout(() => {
-      // If the currently focused element is NOT inside the suggestion box, hide it.
       if (suggestionRef.current && !suggestionRef.current.contains(document.activeElement)) {
         setIsFocused(false);
       }
     }, 150);
+  };
+
+  const clearSearch = () => {
+    setSearchValue('');
+    setIsFocused(false);
   };
 
   return {
@@ -29,5 +30,6 @@ export default function useSearch() {
     debouncedValue,
     suggestionRef,
     handleBlur,
+    clearSearch, // Export the new function
   };
 }

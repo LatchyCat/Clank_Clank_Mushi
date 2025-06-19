@@ -155,9 +155,10 @@ class DataEmbeddingService:
 
         for category in categories:
             logger.info(f"--- Embedding Anime API Category: {category} ---")
-            cat_data, status = self.anime_controller.anime_api_service.get_anime_by_category(category, page=1, limit=limit_per_category)
-            if status == 200 and cat_data.get('success'):
-                items_to_process = cat_data.get('data', [])
+            cat_data, status = self.anime_controller.get_anime_by_category_data(category, page=1)
+            # The get_anime_by_category_data response is a dict with a 'data' key for the list
+            if status == 200 and isinstance(cat_data, dict):
+                items_to_process = cat_data.get('data', [])[:limit_per_category]
                 logger.info(f"Found {len(items_to_process)} items for category '{category}'.")
                 p, f = self.embed_from_anime_api_list(f"category_{category}", items_to_process, fetch_full_details=False)
                 total_processed += p
@@ -175,24 +176,22 @@ class DataEmbeddingService:
             os.remove(ERROR_LOG_FILE)
         self.error_summary.clear()
 
-        # The calling script (build_database.py) now handles loading/clearing.
-        # self.vector_store.load() # This line is removed.
-
         total_processed, total_failed = 0, 0
 
         p, f = self.embed_one_piece_data()
         total_processed += p; total_failed += f
 
-        home_data, status = self.anime_controller.anime_api_service.get_home_info()
-        if status == 200 and home_data.get('success'):
-            results = home_data.get('results', {})
+        home_data, status = self.anime_controller.get_home_page_data()
+
+        # --- DEFINITIVE FIX: Check status and type correctly, don't look for 'success' or 'results' keys ---
+        if status == 200 and isinstance(home_data, dict):
             logger.info("--- Embedding Anime API Section: Spotlights (Full Details) ---")
-            p, f = self.embed_from_anime_api_list('spotlights', results.get('spotlights', []), fetch_full_details=True)
+            p, f = self.embed_from_anime_api_list('spotlights', home_data.get('spotlights', []), fetch_full_details=True)
             total_processed += p; total_failed += f
 
             for section in ['trending', 'top_airing', 'most_popular', 'most_favorite', 'latest_completed', 'latest_episode']:
                 logger.info(f"--- Embedding Anime API Section: {section} (Summary) ---")
-                p, f = self.embed_from_anime_api_list(section, results.get(section, []), fetch_full_details=False)
+                p, f = self.embed_from_anime_api_list(section, home_data.get(section, []), fetch_full_details=False)
                 total_processed += p; total_failed += f
         else:
             total_failed += 1

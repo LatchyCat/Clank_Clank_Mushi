@@ -1,49 +1,25 @@
 // mushi-frontend/src/components/chat/SpoilerText.jsx
 import React, { useState } from 'react';
 
-/**
- * Renders text that can be "spoiled" (hidden) or revealed.
- * The hidden text appears grayed out with "redacted" written over it.
- * Clicking the redacted text reveals the original content.
- *
- * @param {object} props
- * @param {string} props.children - The actual spoiler content to be displayed or hidden.
- * @param {boolean} props.globalShieldActive - If true, forces the spoiler text to be hidden and disables individual toggling.
- */
-function SpoilerText({ children, globalShieldActive }) {
-  // Local state to manage individual spoiler reveal, only active when global shield is off
+function SpoilerText({ children }) {
   const [isRevealed, setIsRevealed] = useState(false);
 
-  // Determine the effective revealed state:
-  // If globalShieldActive is true, it forces the text to be hidden.
-  // Otherwise, use the local 'isRevealed' state.
-  const effectiveIsRevealed = globalShieldActive ? false : isRevealed;
-
+  // A single click handler now controls the entire block of text.
   const toggleReveal = () => {
-    // Only allow local toggling if the global spoiler shield is inactive
-    if (!globalShieldActive) {
-      setIsRevealed(prev => !prev);
-    }
+    setIsRevealed(prev => !prev);
   };
 
   return (
     <span
-      className={`relative inline-block cursor-pointer transition-all duration-200 ${
-        effectiveIsRevealed ? 'text-gray-200' : 'text-transparent bg-purple-500/50 rounded px-1' // Softened background color
-      }`}
       onClick={toggleReveal}
-      title={effectiveIsRevealed ? "Click to hide spoiler" : "Click to reveal spoiler"}
+      title={isRevealed ? "Click to hide spoiler" : "Click to reveal spoiler"}
+      // The cursor and background are applied to the entire block as one unit.
+      className={`cursor-pointer transition-colors duration-200 rounded px-1 ${
+        isRevealed ? 'text-gray-200 bg-transparent' : 'text-transparent bg-purple-500/50'
+      }`}
     >
-      {effectiveIsRevealed ? (
-        children
-      ) : (
-        <span className="absolute inset-0 flex items-center justify-center text-purple-900 text-xs font-bold select-none pointer-events-none"> {/* Adjusted text color */}
-          redacted
-        </span>
-      )}
-      <span className={effectiveIsRevealed ? '' : 'blur-sm'}>
-        {children}
-      </span>
+      {/* The text itself is passed as children and is revealed or blurred together. */}
+      {children}
     </span>
   );
 }

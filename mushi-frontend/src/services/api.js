@@ -1,13 +1,9 @@
 // mushi-frontend/src/services/api.js
+
 import axios from 'axios';
 
-// The base URL for your Flask backend, derived from your config.py
 const API_BASE_URL = 'http://127.0.0.1:8001';
 
-/**
- * Create a configured instance of axios.
- * This instance will be used for all API calls.
- */
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -15,11 +11,6 @@ const apiClient = axios.create({
   },
 });
 
-/**
- * A generic error handler to log errors and re-throw them for components to handle.
- * @param {string} context - The context of the API call (e.g., 'fetching LLM response').
- * @param {Error} error - The error object from axios.
- */
 const handleError = (context, error) => {
   if (axios.isCancel(error)) {
     console.log('Request cancelled:', error.message);
@@ -30,15 +21,14 @@ const handleError = (context, error) => {
   throw new Error(errorMessage);
 };
 
-// --- API Service Object ---
 export const api = {
   llm: {
-    chat: async (query, onChunkReceived, signal) => {
+    chat: async (query, history, onChunkReceived, signal) => {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/llm/chat`, {
+            const response = await fetch(`/api/llm/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ query }),
+                body: JSON.stringify({ query, history }),
                 signal: signal,
             });
 
@@ -49,12 +39,36 @@ export const api = {
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                const chunk = decoder.decode(value, { stream: true });
-                onChunkReceived(chunk);
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    if (line.trim() === '') continue;
+                    try {
+                        const chunk = JSON.parse(line);
+                        onChunkReceived(chunk);
+                    } catch (e) {
+                        console.error("Failed to parse JSON chunk:", line, e);
+                    }
+                }
             }
+             if (buffer.trim() !== '') {
+                try {
+                    const chunk = JSON.parse(buffer);
+                    onChunkReceived(chunk);
+                } catch (e) {
+                    console.error("Failed to parse final JSON chunk:", buffer, e);
+                }
+            }
+
         } catch (error) {
             if (error.name === 'AbortError') {
                 console.log('Chat request aborted by user.');
@@ -63,6 +77,15 @@ export const api = {
             }
             throw error;
         }
+    },
+    resolveLink: async (title) => {
+      try {
+        const response = await apiClient.post('/api/llm/resolve-link', { title });
+        return response.data;
+      } catch (error) {
+        handleError('resolving link', error);
+        return { title, url: `/search?keyword=${encodeURIComponent(title)}` };
+      }
     },
     getProviders: async () => {
       try {
@@ -88,9 +111,9 @@ export const api = {
         handleError('fetching current LLM provider', error);
       }
     },
-    getSuggestedQuestions: async (content) => {
+    getSuggestedQuestions: async (payload) => {
       try {
-        const response = await apiClient.post('/api/llm/suggest-questions', { content });
+        const response = await apiClient.post('/api/llm/suggest-questions', payload);
         return response.data;
       } catch (error) {
         handleError('fetching suggested questions', error);
@@ -158,20 +181,20 @@ export const api = {
         handleError('fetching anime home data', error);
       }
     },
+    getTopSearch: async () => {
+      console.warn("api.anime.getTopSearch is deprecated. Use data from getHomeData instead.");
+      return { results: [
+        { id: 'search-one-piece', title: "One Piece", link: "/search?keyword=One%20Piece" },
+        { id: 'search-jujutsu-kaisen', title: "Jujutsu Kaisen", link: "/search?keyword=Jujutsu%20Kaisen" },
+        { id: 'search-frieren', title: "Frieren: Beyond Journey's End", link: "/search?keyword=Frieren%3A%20Beyond%20Journey's%20End" },
+      ]};
+    },
     getTopTen: async () => {
       try {
         const response = await apiClient.get('/api/anime/top-ten');
         return response.data;
       } catch (error) {
         handleError('fetching top ten anime', error);
-      }
-    },
-    getTopSearch: async () => {
-      try {
-        const response = await apiClient.get('/api/anime/top-search');
-        return response.data;
-      } catch (error) {
-        handleError('fetching top search anime', error);
       }
     },
     getDetails: async (animeId) => {
@@ -190,12 +213,12 @@ export const api = {
         handleError(`fetching anime for category '${category}'`, error);
       }
     },
-    search: async (query, page = 1) => {
+    search: async (filters = {}) => {
       try {
-        const response = await apiClient.get(`/api/anime/search`, { params: { q: query, page } });
-        return response.data;
+          const response = await apiClient.get('/api/anime/search', { params: filters });
+          return response.data;
       } catch (error) {
-        handleError(`searching for anime with query '${query}'`, error);
+          handleError('searching for anime', error);
       }
     },
     getSearchSuggestions: async (keyword) => {
@@ -230,75 +253,76 @@ export const api = {
         handleError(`fetching Qtip info for ID ${qtipId}`, error);
       }
     },
-    getAvailableServers: async (animeId, episodeDataId) => {
+    getAvailableServers: async (episodeDataId) => {
       try {
-        const response = await apiClient.get(`/api/anime/servers/${animeId}`, { params: { ep: episodeDataId } });
+        const response = await apiClient.get(`/api/anime/servers/${episodeDataId}`);
         return response.data;
       } catch (error) {
-        handleError(`fetching available servers for anime ID ${animeId}, episode ID ${episodeDataId}`, error);
+        handleError(`fetching available servers for episode data ID ${episodeDataId}`, error);
       }
     },
-    getStreamingInfo: async (episodeId, serverId, streamType) => {
+    getStreamingInfo: async (animeId, episodeDataId, serverName, streamType) => {
       try {
         const response = await apiClient.get(`/api/anime/stream`, {
           params: {
-            id: episodeId,
-            server: serverId,
-            type: streamType
+            id: episodeDataId,
+            server: serverName,
+            type: streamType,
+            animeId: animeId // Add the new animeId parameter
           }
         });
         return response.data;
       } catch (error) {
-        handleError(`fetching streaming info for episode ID ${episodeId}, server ${serverId}, type ${streamType}`, error);
+        handleError(`fetching streaming info for anime ${animeId}, episode ${episodeDataId}`, error);
       }
     },
   },
 
   data: {
     getClusteredData: async (numClusters = 5) => {
-      try {
-        const response = await apiClient.get('/api/data/clusters', { params: { n_clusters: numClusters } });
-        return response.data;
-      } catch (error) {
-        handleError(`fetching clustered data with ${numClusters} clusters`, error);
-      }
+        try {
+          const response = await apiClient.get('/api/data/clusters', { params: { n_clusters: numClusters } });
+          return response.data;
+        } catch (error) {
+          handleError(`fetching clustered data with ${numClusters} clusters`, error);
+        }
     },
     ingestAllData: async () => {
-      try {
-        const response = await apiClient.post('/api/data/ingest_all_data');
-        return response.data;
-      } catch (error) {
-        handleError('ingesting all data', error);
-      }
+        try {
+          const response = await apiClient.post('/api/data/ingest_all_data');
+          return response.data;
+        } catch (error) {
+          handleError('ingesting all data', error);
+        }
     },
     ingestAnimeApiCategoryData: async (categories, limit) => {
-      try {
-        const response = await apiClient.post('/api/data/ingest_anime_api_category_data', null, {
-          params: { categories, limit_per_category: limit }
-        });
-        return response.data;
-      } catch (error) {
-        handleError(`ingesting category data for ${categories}`, error);
-      }
+        try {
+          const response = await apiClient.post('/api/data/ingest_anime_api_category_data', null, {
+            params: { categories, limit_per_category: limit }
+          });
+          return response.data;
+        } catch (error) {
+          handleError(`ingesting category data for ${categories}`, error);
+        }
     },
   },
 
   news: {
     getLatestNews: async () => {
-      try {
-        const response = await apiClient.get('/api/news/latest');
-        return response.data;
-      } catch (error) {
-        handleError('fetching latest news', error);
-      }
+        try {
+          const response = await apiClient.get('/api/news/latest');
+          return response.data;
+        } catch (error) {
+          handleError('fetching latest news', error);
+        }
     },
     searchNews: async (query) => {
-      try {
-        const response = await apiClient.get(`/api/news/search?query=${encodeURIComponent(query)}`);
-        return response.data;
-      } catch (error) {
-        handleError('searching news', error);
-      }
+        try {
+          const response = await apiClient.get(`/api/news/search?query=${encodeURIComponent(query)}`);
+          return response.data;
+        } catch (error) {
+          handleError('searching news', error);
+        }
     },
   },
 };

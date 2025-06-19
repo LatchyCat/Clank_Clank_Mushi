@@ -1,101 +1,103 @@
 // mushi-frontend/src/components/anime/AnimeQuickInfoCard.jsx
-import React, { useState, useEffect } from 'react';
-import { api } from '../../services/api'; // Correct path to api.js
+import React, { useState, useEffect, useRef } from 'react';
+import { api } from '../../services/api';
 
-/**
- * AnimeQuickInfoCard component fetches and displays a "quick tip" or brief information
- * about a specific anime based on its qtipId.
- *
- * @param {object} props
- * @param {number} props.qtipId - The ID of the Qtip/quick info to display.
- */
 function AnimeQuickInfoCard({ qtipId }) {
   const [qtipInfo, setQtipInfo] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
+  // --- START OF DEFINITIVE FIX ---
+  // Use a ref to track the last ID we fetched to prevent unnecessary state resets
+  const fetchedIdRef = useRef(null);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchQtip = async () => {
       if (!qtipId) {
-        setError("Eeeh~ Senpai, Mushi needs a Qtip ID to show quick info! (•́-•̀)");
-        setIsLoading(false);
+        if (isMounted) setIsLoading(false);
         return;
       }
 
-      try {
-        setIsLoading(true);
-        setError(null); // Clear previous errors
-        const data = await api.anime.getQtipInfo(qtipId); // Fetch Qtip info
+      // ONLY reset state and show loader if we are fetching for a NEW anime ID.
+      // This prevents the flicker when the parent component re-renders for other reasons (like position updates).
+      if (qtipId !== fetchedIdRef.current) {
+        if (isMounted) {
+            setIsLoading(true);
+            setError(null);
+            setQtipInfo(null);
+        }
+        fetchedIdRef.current = qtipId; // Mark this ID as being fetched
+      } else {
+        // If it's the same ID, we don't need to re-show the loader or clear existing data.
+        // This makes the card feel stable even during parent re-renders.
+        if(isMounted) setIsLoading(false);
+      }
 
-        if (data) {
-          setQtipInfo(data);
-          console.log(`Mushi found quick info for Qtip ID: ${qtipId}, desu!~`, data);
-        } else {
-          setError("Muu... Mushi couldn't find quick info for that ID. Gomen'nasai! (T_T)");
+
+      try {
+        const data = await api.anime.getQtipInfo(qtipId);
+
+        if (isMounted) {
+          if (data && data.title) {
+            setQtipInfo(data);
+          } else {
+            setQtipInfo(null);
+            console.warn(`Qtip for ID ${qtipId} returned no valid data.`);
+          }
         }
       } catch (err) {
-        console.error(`Uwaah! Failed to fetch Qtip info for ID ${qtipId}:`, err);
-        setError(`Mushi encountered an error while fetching quick info: ${err.message || "Unknown error"} (>_<)`);
+        if (isMounted) {
+          console.error(`Uwaah! Failed to fetch Qtip info for ID ${qtipId}:`, err);
+          setError(`Mushi couldn't get quick info. Gomen!`);
+          setQtipInfo(null);
+        }
       } finally {
-        setIsLoading(false);
+        if (isMounted) {
+          setIsLoading(false);
+        }
       }
     };
 
     fetchQtip();
-  }, [qtipId]); // Re-run effect when qtipId changes
 
-  if (isLoading) {
+    return () => {
+      isMounted = false;
+    };
+  }, [qtipId]);
+  // --- END OF DEFINITIVE FIX ---
+
+
+  // Show loader only when loading is true AND we don't have previous info to display
+  if (isLoading && !qtipInfo) {
     return (
-      <div className="flex justify-center items-center h-24 text-indigo-300 text-sm
-                      bg-white/5 backdrop-blur-sm rounded-xl shadow-inner border border-purple-500/30">
-        Mushi is thinking of a quick tip! Waku waku!~ ☆
+      <div className="w-80 p-4 bg-neutral-800 rounded-lg shadow-xl text-center text-indigo-300 text-sm animate-pulse">
+        Mushi is peeking...
       </div>
     );
   }
 
-  if (error) {
-    return (
-      <div className="text-red-400 text-center p-4 border border-red-500 rounded-xl bg-red-900/30 text-sm shadow-md">
-        Oh no! {error}
-      </div>
-    );
+  // If there's an error, or if there's no data after loading, render nothing.
+  if (error || !qtipInfo) {
+    return null;
   }
 
-  if (!qtipInfo) {
-    return (
-      <div className="text-gray-400 text-center p-4 text-sm
-                      bg-white/5 backdrop-blur-sm rounded-xl shadow-inner border border-gray-700/50">
-        Muu... No quick info found. (T_T)
-      </div>
-    );
-  }
-
+  // Otherwise, render the card with the fetched data.
   return (
-    <div className="bg-white/5 backdrop-blur-md rounded-xl shadow-2xl p-6 text-gray-100 border border-purple-500/30
-                    transform hover:scale-[1.02] transition-transform duration-300 hover:shadow-purple-500/20">
-      <h3 className="text-2xl font-bold mb-3
+    <div className="w-80 bg-neutral-900 border border-purple-500/30 backdrop-blur-md rounded-xl shadow-2xl p-6 text-gray-100 transform transition-transform duration-300">
+      <h3 className="text-xl font-bold mb-3
                      bg-clip-text text-transparent bg-gradient-to-r from-pink-400 to-purple-400
-                     drop-shadow-lg [text-shadow:0_0_8px_rgba(255,100,255,0.2)]">
-        {qtipInfo.title || "Quick Info"}
+                     drop-shadow-lg [text-shadow:0_0_8px_rgba(255,100,255,0.2)] line-clamp-2">
+        {qtipInfo.title}
       </h3>
-      <p className="text-gray-200 text-base leading-relaxed mb-4">{qtipInfo.description || "No description provided."}</p>
+      <p className="text-gray-300 text-sm leading-relaxed mb-4 line-clamp-4">{qtipInfo.description || "No description provided."}</p>
 
-      {/* Optional: Add a link or button for more details */}
-      {qtipInfo.link && (
-        <a
-          href={qtipInfo.link}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center text-indigo-400 hover:text-indigo-300 text-sm font-medium
-                     bg-purple-800/50 px-4 py-2 rounded-full transition-all duration-200
-                     hover:bg-purple-700/70 shadow-md hover:shadow-lg"
-        >
-          Learn More~
-          <svg xmlns="http://www.w3.org/2000/svg" className="ml-2 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3" />
-          </svg>
-        </a>
-      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-gray-400">
+        <span><strong className="text-gray-200">Type:</strong> {qtipInfo.type || 'N/A'}</span>
+        <span><strong className="text-gray-200">Episodes:</strong> {qtipInfo.episodeCount || 'N/A'}</span>
+        <span><strong className="text-gray-200">Status:</strong> {qtipInfo.status || 'N/A'}</span>
+        <span><strong className="text-gray-200">Rating:</strong> {qtipInfo.rating || 'N/A'}</span>
+      </div>
     </div>
   );
 }
