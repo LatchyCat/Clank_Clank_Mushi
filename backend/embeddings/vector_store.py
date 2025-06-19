@@ -1,197 +1,151 @@
 # backend/embeddings/vector_store.py
 import numpy as np
-import pickle # For saving/loading Python objects
-import gzip   # For compression
-import os     # For file path operations
+import pickle
+import gzip
+import os
+import faiss
 import logging
-from typing import List, Dict, Optional, Any, Tuple # Added Tuple for similarity_search return type
+from typing import List, Dict, Optional, Any
 
-# Configure logging for this module
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class VectorStore:
     """
-    A simple in-memory vector store for storing documents and their embeddings.
-    Provides basic similarity search using cosine similarity.
-    Supports persistence to a .pkl.gz file.
+    A high-performance in-memory vector store using Faiss for efficient similarity search.
     """
     def __init__(self, db_path: str):
         self.db_path = db_path
+        self.index_path = db_path.replace('.pkl.gz', '.faiss')
         self.documents: List[Dict] = []
+        self.faiss_index: Optional[faiss.Index] = None
+        self.dimension: Optional[int] = None
         self.next_id = 0
-        logger.info(f"VectorStore: Initializing VectorStore with persistence path: {self.db_path}")
-        self.load() # Attempt to load existing data on initialization
+        self.source_id_map: Dict[str, int] = {}
+        logger.info(f"VectorStore: Initializing with DB path: {self.db_path} and Faiss index: {self.index_path}")
+
+    def _initialize_faiss_index(self, dimension: int):
+        """Initializes a new Faiss index."""
+        if self.dimension and self.dimension != dimension:
+            logger.warning(f"VectorStore: Dimension mismatch. Current: {self.dimension}, New: {dimension}. Re-initializing.")
+        self.dimension = dimension
+        self.faiss_index = faiss.IndexIDMap(faiss.IndexFlatL2(self.dimension))
+        logger.info(f"VectorStore: Initialized new Faiss index with dimension {self.dimension}.")
 
     def add_document(self, content: str, embedding: List[float], metadata: Optional[Dict] = None, source_item_id: Optional[str] = None):
-        """
-        Adds a document to the vector store, checking for duplicates by source_item_id.
+        if source_item_id and self.get_document_by_source_id(source_item_id):
+            logger.debug(f"Document with source_item_id '{source_item_id}' already exists. Skipping.")
+            return
 
-        Args:
-            content (str): The original text content of the document.
-            embedding (List[float]): The embedding vector of the content.
-            metadata (Optional[Dict]): Optional dictionary of additional metadata for the document.
-            source_item_id (Optional[str]): A unique identifier from the original data source to prevent duplicates.
-        """
-        # Ensure embedding is a numpy array for consistent operations
-        if not isinstance(embedding, np.ndarray):
-            embedding = np.array(embedding)
+        doc_id = self.next_id
+        embedding_np = np.array([embedding], dtype=np.float32)
 
-        # Check for duplicate source_item_id to prevent re-embedding the same item
-        if source_item_id:
-            if any(doc.get("source_item_id") == source_item_id for doc in self.documents):
-                logger.debug(f"VectorStore: Document with source_item_id '{source_item_id}' already exists. Skipping.")
-                return
+        if self.faiss_index is None:
+            self._initialize_faiss_index(embedding_np.shape[1])
 
-        document = {
-            "id": self.next_id,
-            "content": content,
-            "embedding": embedding,
-            "metadata": metadata if metadata is not None else {},
-            "source_item_id": source_item_id
-        }
+        if self.dimension != embedding_np.shape[1]:
+            logger.error(f"Dimension mismatch: Expected {self.dimension}, got {embedding_np.shape[1]}. Skipping document.")
+            return
+
+        self.faiss_index.add_with_ids(embedding_np, np.array([doc_id]))
+        document = {"id": doc_id, "content": content, "embedding": embedding, "metadata": metadata or {}, "source_item_id": source_item_id}
         self.documents.append(document)
-        self.next_id += 1
-        logger.debug(f"VectorStore: Added document ID {document['id']} (Source ID: {source_item_id}). Total documents: {len(self.documents)}")
 
+        if source_item_id:
+            self.source_id_map[source_item_id] = doc_id
+        self.next_id += 1
 
     def get_document_by_source_id(self, source_item_id: str) -> Optional[Dict]:
-        """
-        Retrieves a document by its source_item_id.
-        """
-        for doc in self.documents:
-            if doc.get("source_item_id") == source_item_id:
-                return doc
+        """Efficiently retrieves a document by its unique source_item_id using a map."""
+        doc_id = self.source_id_map.get(source_item_id)
+        if doc_id is not None:
+            # This is slightly inefficient but safer than assuming list index equals doc_id
+            for doc in self.documents:
+                if doc['id'] == doc_id:
+                    return doc
         return None
 
     def similarity_search(self, query_embedding: List[float], top_k: int = 5) -> List[Dict[str, Any]]:
-        """
-        Performs a cosine similarity search against stored document embeddings.
-
-        Args:
-            query_embedding (List[float]): The embedding vector of the query.
-            top_k (int): The number of top similar documents to return.
-
-        Returns:
-            List[Dict]: A list of dictionaries, where each dictionary is a document
-                        augmented with a 'similarity_score'. Sorted by score descending.
-        """
-        if not self.documents or not query_embedding:
-            logger.warning("VectorStore: No documents or query embedding for similarity search.")
+        if self.faiss_index is None or self.faiss_index.ntotal == 0:
             return []
 
-        query_embedding_array = np.array(query_embedding)
-        if query_embedding_array.ndim == 1:
-            query_embedding_array = query_embedding_array.reshape(1, -1)
+        query_vector = np.array([query_embedding], dtype=np.float32)
+        distances, indices = self.faiss_index.search(query_vector, top_k)
 
-        # Ensure query_embedding is a unit vector (normalized)
-        norm_query_embedding = query_embedding_array / np.linalg.norm(query_embedding_array, axis=1, keepdims=True)
-
-        scores = []
-        for doc in self.documents:
-            doc_embedding = doc.get("embedding")
-            # Ensure embedding is a numpy array before performing calculations
-            if isinstance(doc_embedding, list):
-                doc_embedding = np.array(doc_embedding)
-
-            if doc_embedding is not None and isinstance(doc_embedding, np.ndarray) and doc_embedding.size > 0:
-                # Ensure document embedding is a unit vector (normalized)
-                norm_doc_embedding = doc_embedding / np.linalg.norm(doc_embedding)
-
-                # Reshape if necessary to perform dot product
-                if norm_doc_embedding.ndim == 1:
-                    norm_doc_embedding = norm_doc_embedding.reshape(1, -1)
-
-                similarity = np.dot(norm_query_embedding, norm_doc_embedding.T)[0][0]
-                scores.append((similarity, doc))
-            else:
-                logger.warning(f"VectorStore: Skipping document ID {doc.get('id')} due to missing or invalid embedding for similarity search.")
-
-        # Sort by similarity score in descending order
-        scores.sort(key=lambda x: x[0], reverse=True)
-
-        # Return top_k documents with their scores
-        result = []
-        for score, doc in scores[:top_k]:
-            doc_copy = doc.copy()
-            doc_copy['similarity_score'] = float(score) # Ensure score is standard float
-            result.append(doc_copy)
-
-        logger.debug(f"VectorStore: Found {len(result)} relevant documents.")
-        return result
-
-    def get_all_documents_with_embeddings(self) -> List[Dict[str, Any]]:
-        """
-        Returns all documents currently in the store, ensuring embeddings are NumPy arrays.
-        """
-        return [doc for doc in self.documents if doc.get('embedding') is not None]
+        results = []
+        doc_map = {doc['id']: doc for doc in self.documents}
+        for i, doc_id in enumerate(indices[0]):
+            if doc_id != -1: # Faiss returns -1 for no result
+                doc = doc_map.get(int(doc_id))
+                if doc:
+                    doc_copy = doc.copy()
+                    doc_copy['distance'] = float(distances[0][i])
+                    results.append(doc_copy)
+        return results
 
     def save(self):
-        """
-        Saves the current state of the vector store to a gzipped pickle file.
-        Converts numpy arrays to lists for serialization if necessary.
-        """
+        """Saves the Faiss index and the document data (including embeddings) to disk."""
+        logger.info(f"Attempting to save vector store to {self.db_path}")
+        if self.faiss_index is None:
+            logger.warning("Faiss index is not initialized. Nothing to save.")
+            return
         try:
-            # Prepare documents for serialization: convert numpy arrays to lists
-            serializable_documents = []
-            for doc in self.documents:
-                doc_copy = doc.copy()
-                if isinstance(doc_copy.get("embedding"), np.ndarray):
-                    doc_copy["embedding"] = doc_copy["embedding"].tolist()
-                serializable_documents.append(doc_copy)
-
+            faiss.write_index(self.faiss_index, self.index_path)
+            # We save the full documents including their embeddings for reliability.
             data_to_save = {
-                "documents": serializable_documents,
-                "next_id": self.next_id
+                "documents": self.documents,
+                "next_id": self.next_id,
+                "dimension": self.dimension,
+                "source_id_map": self.source_id_map
             }
             with gzip.open(self.db_path, 'wb') as f:
                 pickle.dump(data_to_save, f)
-            logger.info(f"VectorStore: Successfully saved {len(self.documents)} documents to {self.db_path}. Next ID: {self.next_id}")
+            logger.info(f"Successfully saved {len(self.documents)} documents and Faiss index with {self.faiss_index.ntotal} vectors.")
         except Exception as e:
-            logger.error(f"VectorStore: Failed to save vector store to {self.db_path}: {e}", exc_info=True)
+            logger.error(f"Failed to save vector store: {e}", exc_info=True)
 
     def load(self):
-        """
-        Loads the vector store from a gzipped pickle file.
-        Converts embedding lists back to numpy arrays upon loading.
-        """
-        if not os.path.exists(self.db_path):
-            logger.warning(f"VectorStore: Database file not found at {self.db_path}. Starting fresh.")
-            self.documents = []
-            self.next_id = 0
+        """Loads the Faiss index and document data from disk."""
+        if not os.path.exists(self.db_path) or not os.path.exists(self.index_path):
+            logger.warning("Database or Faiss index file not found. Starting fresh.")
+            self.clear()
             return
-
         try:
+            self.faiss_index = faiss.read_index(self.index_path)
             with gzip.open(self.db_path, 'rb') as f:
                 data = pickle.load(f)
-
-            loaded_documents = []
-            for doc in data.get("documents", []):
-                # Convert embedding lists back to NumPy arrays if they were saved as lists
-                if isinstance(doc.get("embedding"), list):
-                    doc["embedding"] = np.array(doc["embedding"])
-                loaded_documents.append(doc)
-
-            self.documents = loaded_documents
-            self.next_id = data.get("next_id", 0)
-            logger.info(f"VectorStore: Successfully loaded {len(self.documents)} documents from {self.db_path}.")
-            if self.documents:
-                # Recalculate next_id to ensure it's correct even if not perfectly saved or if IDs are not sequential
-                self.next_id = max([doc["id"] for doc in self.documents]) + 1
-                logger.info(f"VectorStore: Recalculated next_id to {self.next_id} after loading.")
-
-        except EOFError:
-            logger.warning(f"VectorStore: {self.db_path} is empty or corrupted (EOFError). Starting fresh.")
-            self.documents = []
-            self.next_id = 0
+            self.documents = data.get("documents", [])
+            self.next_id = data.get("next_id", len(self.documents))
+            self.dimension = data.get("dimension") or self.faiss_index.d
+            self.source_id_map = data.get("source_id_map", {})
+            # Verification step
+            if self.documents and 'embedding' not in self.documents[0]:
+                logger.error("Loaded documents are missing embeddings! The pickle file might be from an old version. Clearing and starting fresh to prevent issues.")
+                self.clear()
+                return
+            logger.info(f"Successfully loaded {self.faiss_index.ntotal} vectors and {len(self.documents)} documents.")
         except Exception as e:
-            logger.error(f"VectorStore: Failed to load vector store from {self.db_path}: {e}. Starting fresh.")
-            self.documents = []
-            self.next_id = 0
+            logger.error(f"Failed to load vector store: {e}. Starting fresh.", exc_info=True)
+            self.clear()
+
+    def get_all_documents_with_embeddings(self) -> List[Dict[str, Any]]:
+        return [doc for doc in self.documents if 'embedding' in doc and doc['embedding'] is not None]
 
     def clear(self):
-        """Clears all documents from the vector store."""
+        """Clears the in-memory store and deletes the corresponding files."""
         self.documents = []
+        self.faiss_index = None
+        self.dimension = None
         self.next_id = 0
-        logger.info("VectorStore: Cleared all documents.")
-        self.save() # Save the empty state
+        self.source_id_map = {}
+        if os.path.exists(self.index_path):
+            try:
+                os.remove(self.index_path)
+            except OSError as e:
+                logger.error(f"Error removing Faiss index file: {e}")
+        if os.path.exists(self.db_path):
+            try:
+                os.remove(self.db_path)
+            except OSError as e:
+                logger.error(f"Error removing DB pickle file: {e}")
+        logger.info("Cleared all documents and Faiss index.")

@@ -40,46 +40,36 @@ class LLMController:
 
     @staticmethod
     def _find_and_verify_links(text: str) -> str:
+        pattern = re.compile(r'\b(?:[A-Z][\w\'\-.:!&]*\s+){1,6}[A-Z][\w\'\-.:!&]*\b')
+        matches = pattern.finditer(text)
+        ignore_list = {"The", "A", "An", "Is", "It", "Of", "And", "He", "She", "They", "One Piece", "Naruto Shippuden"}
+        replacements = []
+        for match in matches:
+            potential_title = match.group(0).strip()
+            if potential_title not in ignore_list and len(potential_title) > 3:
+                 replacements.append((potential_title, f'[LINK:{potential_title}]'))
+        replacements.sort(key=lambda x: len(x[0]), reverse=True)
         processed_text = text
-        # Regex to find potential titles (sequences of capitalized words, allowing for colons, hyphens, etc.)
-        potential_titles = re.findall(r'\b([A-Z][a-zA-Z0-9\s\'":-]*[a-zA-Z0-9])\b', text)
-
-        unique_titles = sorted(list(set(potential_titles)), key=len, reverse=True)
-        linked_titles = set()
-
-        # --- START OF FIX: Prevent bad API calls causing `trim()` error and slowdown ---
-        # Define a set of common words to ignore. This prevents API calls for words like "The", "And", "You".
-        ignore_list = {
-            "i", "the", "a", "an", "of", "and", "in", "is", "it", "senpai", "okay",
-            "however", "therefore", "first", "since", "would", "you", "he", "she",
-            "let", "me", "what", "how", "when", "where", "why", "who",
-            "from", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"
-        }
-
-        for title in unique_titles:
-            clean_title = title.strip().lower()
-
-            # Skip this potential title if it's too short, in the ignore list, or already linked.
-            if len(clean_title) < 4 or clean_title in ignore_list or clean_title in linked_titles:
-                continue
-            # --- END OF FIX ---
-
-            # This API call will now only run for legitimate, filtered titles.
-            suggestions, status = global_anime_controller.get_search_suggestions_data(title)
-            if status == 200 and suggestions.get("results"):
-                canonical_title = suggestions["results"][0].get("title", title)
-
-                pattern = re.compile(r'\b' + re.escape(title) + r'\b', re.IGNORECASE)
-
-                if pattern.search(processed_text) and canonical_title.lower() not in linked_titles:
-                    processed_text = pattern.sub(f'[LINK:{canonical_title}]', processed_text, count=1)
-                    linked_titles.add(canonical_title.lower())
-
+        for old, new in replacements:
+            processed_text = re.sub(r'\b' + re.escape(old) + r'\b', new, processed_text)
         return processed_text
-
 
     @staticmethod
     def generate_llm_response(user_query: str, history: Optional[List[Dict]] = None) -> Generator[str, None, None]:
+        try:
+            current_llm_key = Config.CURRENT_GENERATION_LLM
+            if current_llm_key == 'gemini':
+                yield json.dumps({"type": "error", "content": "Gemini provider is not fully implemented yet."}) + "\n"
+                return
+            elif current_llm_key == 'ollama_qwen3':
+                llm_service = OllamaLLMService(model_name=Config.OLLAMA_QWEN3_MODEL_NAME)
+            else:
+                 yield json.dumps({"type": "error", "content": f"No valid LLM provider configured. Current is '{current_llm_key}'"}) + "\n"
+                 return
+        except Exception as e:
+            yield json.dumps({"type": "error", "content": f"Error initializing LLM service: {e}"}) + "\n"
+            return
+
         user_query_embedding = global_ollama_embedder.embed_text(user_query)
         rag_context = ""
         if user_query_embedding:
@@ -94,28 +84,39 @@ class LLMController:
 
         final_prompt_for_llm = f"{history_context}{rag_context}\n\nUser Query: {user_query}"
 
-        current_llm_key = Config.CURRENT_GENERATION_LLM
-        if current_llm_key != "ollama_qwen3":
-            yield json.dumps({"type": "error", "content": "No valid LLM provider configured."}) + "\n"
-            return
-
-        llm_service = OllamaLLMService(model_name=Config.OLLAMA_QWEN3_MODEL_NAME)
-
-        full_response_text = "".join(llm_service.stream_formatted_response(final_prompt_for_llm))
+        full_response_text = ""
+        try:
+            for chunk in llm_service.stream_formatted_response(final_prompt_for_llm):
+                full_response_text += chunk
+        except Exception as e:
+             yield json.dumps({"type": "error", "content": f"Error during LLM stream: {str(e)}"}) + "\n"
+             return
 
         if not full_response_text or full_response_text.startswith("Error:"):
             yield json.dumps({"type": "error", "content": full_response_text or "LLM returned no response."}) + "\n"
             return
 
-        mood_match = re.search(r'<mood>(.*?)</mood>', full_response_text)
+        # --- START OF DEFINITIVE FIX ---
+        # Strip all unwanted tags before sending any part of the response.
+
+        # 1. Extract and remove the <mood> tag
+        mood_match = re.search(r'<mood>(.*?)</mood>', full_response_text, re.IGNORECASE)
         mood = 'happy'
         if mood_match:
-            mood = mood_match.group(1).strip()
-            full_response_text = full_response_text.replace(mood_match.group(0), '', 1).lstrip()
+            mood = mood_match.group(1).strip().lower()
+            full_response_text = full_response_text.replace(mood_match.group(0), '', 1).strip()
+
+        # 2. Remove any <think> blocks completely.
+        full_response_text = re.sub(r'<think>.*?</think>', '', full_response_text, flags=re.DOTALL).strip()
+
+        # 3. Remove any other stray tags that might have been generated.
+        full_response_text = re.sub(r'<[^>]+>', '', full_response_text).strip()
+        # --- END OF DEFINITIVE FIX ---
+
+        # Now we can safely yield the processed data
         yield json.dumps({"type": "mood", "content": mood}) + "\n"
 
         final_text = LLMController._find_and_verify_links(full_response_text)
-
         yield json.dumps({"type": "text", "content": final_text}) + "\n"
 
 
@@ -134,18 +135,16 @@ class LLMController:
         Generate exactly 3 diverse and insightful follow-up questions a user might ask next.
         RULES:
         1. Output ONLY the 3 questions, separated by "|||".
-        2. DO NOT use any special tags.
-        3. DO NOT use numbering or bullet points.
+        2. DO NOT use any special tags, numbering, or bullet points.
         EXAMPLE OUTPUT: What are some other anime with a complex magic system?|||How does the power scaling in that anime compare to others?|||Are there any characters who question the morality of the magic system?
         """
-
         llm_service = OllamaLLMService(model_name=Config.OLLAMA_QWEN3_MODEL_NAME)
         llm_raw_response = llm_service.get_simple_response(question_generation_prompt)
 
         if not llm_raw_response or llm_raw_response.startswith("Error:"):
             return {"error": llm_raw_response or "Failed to generate suggestions."}, 500
 
-        questions = [q.strip() for q in llm_raw_response.split('|||') if q.strip()]
+        questions = [q.strip().strip('"') for q in llm_raw_response.split('|||') if q.strip()]
         final_questions = [re.sub(r'^\s*[-*]?\s*\d*\.\s*', '', q) for q in questions]
 
         return {"suggested_questions": final_questions[:3]}, 200

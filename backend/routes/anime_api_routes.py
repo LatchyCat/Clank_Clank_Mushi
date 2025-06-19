@@ -1,12 +1,12 @@
 # backend/routes/anime_api_routes.py
 from flask import Blueprint, jsonify, request
-from controllers.anime_controller import AnimeController
+# Import the global controller instance instead of the class
+from globals import global_anime_controller as anime_controller
 import logging
 
 logger = logging.getLogger(__name__)
 
 anime_api_bp = Blueprint('anime_api', __name__, url_prefix='/api/anime')
-anime_controller = AnimeController()
 
 @anime_api_bp.route('/search-suggestions', methods=['GET'])
 def get_search_suggestions_route():
@@ -97,10 +97,8 @@ def get_voice_actor_details_route(actor_id: str):
     data, status_code = anime_controller.get_voice_actor_details_data(actor_id)
     return jsonify(data), status_code
 
-# --- START OF FIX: Change route to accept string instead of int ---
 @anime_api_bp.route('/qtip/<string:qtip_id>', methods=['GET'])
 def get_qtip_info_route(qtip_id: str):
     logger.info(f"API Request: /api/anime/qtip/{qtip_id}")
     data, status_code = anime_controller.get_qtip_info_data(qtip_id)
     return jsonify(data), status_code
-# --- END OF FIX ---

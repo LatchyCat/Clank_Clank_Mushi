@@ -13,9 +13,118 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 logger = logging.getLogger(__name__)
 
 class AnimeController:
-    def __init__(self):
-        self.anime_api_service = AnimeAPIService()
-        logger.info("AnimeController: Initialized.")
+    def __init__(self, anime_api_service: AnimeAPIService):
+        self.anime_api_service = anime_api_service
+        logger.info("AnimeController: Initialized with AnimeAPIService.")
+
+    def _ensure_is_list(self, value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [value]
+        return []
+
+    def _format_anime_list_common(self, anime_list: list) -> list:
+        formatted = []
+        if not isinstance(anime_list, list):
+             logger.warning(f"Data for formatting is not a list: {type(anime_list)}")
+             return []
+
+        for anime in anime_list:
+            if not isinstance(anime, dict) or not anime.get("id"):
+                continue
+
+            tv_info = anime.get("tvInfo")
+            if not isinstance(tv_info, dict):
+                tv_info = {}
+
+            formatted.append({
+                "id": anime.get("id"),
+                "title": anime.get("title"),
+                "poster_url": anime.get("poster"),
+                "jname": anime.get("jname") or anime.get("japanese_title"),
+                "show_type": anime.get("showType") or anime.get("type"),
+                "score": anime.get("score"),
+                "description": anime.get("description"),
+                "tvInfo": {
+                    "sub": tv_info.get("sub"),
+                    "dub": tv_info.get("dub"),
+                    "rating": tv_info.get("rating"),
+                    "showType": anime.get("showType") or anime.get("type"),
+                    "duration": anime.get("duration"),
+                }
+            })
+        return formatted
+
+    def _format_anime_list_home(self, anime_list: list) -> list:
+        return self._format_anime_list_common(anime_list)
+
+    def get_home_page_data(self) -> tuple[dict, int]:
+        logger.debug("AnimeController: Fetching home page data.")
+
+        # Initial call to get spotlights, trending, and base data
+        raw_home_data, home_status_code = self.anime_api_service.get_home_info()
+
+        if home_status_code != 200:
+            logger.error(f"AnimeController: Failed to fetch base home data. Status: {home_status_code}")
+            return raw_home_data, home_status_code
+
+        if not raw_home_data or not raw_home_data.get('success') or 'results' not in raw_home_data:
+            logger.error("AnimeController: Invalid or missing 'results' in base home page data.")
+            return {"error": "Invalid data format from external API for home."}, 500
+
+        home_results = raw_home_data.get('results', {})
+
+        # Initialize with data from the first call
+        formatted_home_data = {
+            "spotlights": self._format_anime_list_home(home_results.get("spotlights", [])),
+            "trending": self._format_anime_list_home(home_results.get("trending", [])),
+            "genres": home_results.get("genres", []),
+            "top_airing": [],
+            "most_popular": [],
+            "most_favorite": [],
+            "latest_completed": [],
+            "latest_episode": [],
+        }
+
+        # Define categories to fetch from their specific endpoints
+        categories_to_fetch = {
+            "top-airing": "top_airing",
+            "most-popular": "most_popular",
+            "most-favorite": "most_favorite",
+            "completed": "latest_completed",
+            "recently-updated": "latest_episode",
+        }
+
+        for api_slug, dict_key in categories_to_fetch.items():
+            logger.info(f"AnimeController: Fetching category '{api_slug}' for home page.")
+            # Use the dedicated get_anime_by_category method
+            category_data, status_code = self.anime_api_service.get_anime_by_category(api_slug, page=1, limit=20)
+
+            if status_code == 200 and category_data.get('success'):
+                # The data structure from category endpoints is { results: { data: [...] } }
+                anime_list = category_data.get('results', {}).get('data', [])
+                formatted_home_data[dict_key] = self._format_anime_list_common(anime_list)
+                logger.info(f"Successfully fetched and formatted '{api_slug}'. Found {len(anime_list)} items.")
+            else:
+                logger.warning(f"AnimeController: Failed to fetch category '{api_slug}'. Status: {status_code}, Response: {category_data}")
+
+        logger.info("Successfully fetched and formatted all home page sections.")
+        return formatted_home_data, 200
+
+    def get_qtip_info_data(self, qtip_id: str) -> tuple[dict, int]:
+        logger.debug(f"AnimeController: Fetching Qtip info for ID: {qtip_id}")
+        raw_data, status_code = self.anime_api_service.get_qtip_info(qtip_id)
+
+        if status_code != 200 or not raw_data.get('success'):
+            error_message = raw_data.get('message', 'Failed to fetch qtip info')
+            logger.error(f"AnimeController: Failed to fetch qtip info for {qtip_id}. Status: {status_code}, Data: {raw_data}")
+            return {"error": error_message}, status_code
+
+        results = raw_data.get("results", {})
+        anime_info = results.get("anime", {})
+
+        return anime_info, 200
 
     def _format_search_suggestions(self, suggestions_list: list) -> list:
         formatted = []
@@ -45,13 +154,6 @@ class AnimeController:
         formatted_suggestions = self._format_search_suggestions(raw_data.get("results", []))
         return {"results": formatted_suggestions}, 200
 
-    def _ensure_is_list(self, value):
-        if isinstance(value, list):
-            return value
-        if isinstance(value, str):
-            return [value]
-        return []
-
     def _format_search_results(self, anime_list: list) -> list:
         formatted = []
         if not isinstance(anime_list, list):
@@ -73,66 +175,6 @@ class AnimeController:
                 "tvInfo": anime.get("tvInfo")
             })
         return formatted
-
-    def get_home_page_data(self) -> tuple[dict, int]:
-        logger.debug("AnimeController: Fetching home page data.")
-
-        raw_home_data, home_status_code = self.anime_api_service.get_home_info()
-
-        if home_status_code != 200:
-            logger.error(f"AnimeController: Failed to fetch base home data. Status: {home_status_code}")
-            return raw_home_data, home_status_code
-
-        if not raw_home_data or not raw_home_data.get('success') or 'results' not in raw_home_data:
-            logger.error("AnimeController: Invalid or missing 'results' in base home page data.")
-            return {"error": "Invalid data format from external API for home."}, 500
-
-        home_results = raw_home_data.get('results', {})
-
-        formatted_home_data = {
-            "spotlights": self._format_anime_list_home(home_results.get("spotlights", [])),
-            "trending": self._format_anime_list_home(home_results.get("trending", [])),
-            "genres": home_results.get("genres", []),
-            "today_schedule": [],
-            "top_airing": [],
-            "most_popular": [],
-            "most_favorite": [],
-            "latest_completed": [],
-            "latest_episode": [],
-        }
-
-        categories_to_fetch = {
-            "recently-updated": "latest_episode",
-            "completed": "latest_completed",
-            "top-airing": "top_airing",
-            "most-popular": "most_popular",
-            "most-favorite": "most_favorite",
-        }
-
-        for api_slug, dict_key in categories_to_fetch.items():
-            logger.info(f"AnimeController: Fetching category '{api_slug}' for home page.")
-            category_data, status_code = self.anime_api_service.get_anime_by_category(api_slug, page=1, limit=20)
-
-            if status_code == 200 and category_data.get('success'):
-                anime_list = category_data.get('results', {}).get('data', [])
-                formatted_home_data[dict_key] = self._format_anime_list_common(anime_list)
-                logger.info(f"Successfully fetched and formatted '{api_slug}'. Found {len(anime_list)} items.")
-            else:
-                logger.warning(f"AnimeController: Failed to fetch category '{api_slug}'. Status: {status_code}, Response: {category_data}")
-
-        today_date = datetime.now().strftime('%Y-%m-%d')
-        logger.info(f"AnimeController: Fetching schedule for today: {today_date}")
-
-        schedule_data, schedule_status = self.anime_api_service.get_estimated_schedules(today_date)
-
-        if schedule_status == 200 and schedule_data.get('success'):
-            schedule_list = schedule_data.get('results', [])
-            formatted_home_data['today_schedule'] = self._format_schedule_list(schedule_list)
-            logger.info(f"Successfully fetched schedule for {today_date}. Found {len(schedule_list)} items.")
-        else:
-            logger.warning(f"AnimeController: Failed to fetch schedule. Status: {schedule_status}, Response: {schedule_data}")
-
-        return formatted_home_data, 200
 
     def get_top_search_anime_data(self) -> tuple[dict, int]:
         logger.debug("AnimeController: Fetching top search anime data.")
@@ -269,43 +311,31 @@ class AnimeController:
             "episodes": [],
             "characters_voice_actors": [],
             "seasons": self._format_seasons(seasons_list),
-            "related_anime": [],
-            "recommended_anime": []
+            "related_anime": self._format_anime_list_common(results.get("relatedAnimes", [])),
+            "recommended_anime": self._format_anime_list_common(results.get("recommendedAnimes", []))
         }
 
         episodes_data, episodes_status = self.anime_api_service.get_episode_list(anime_id)
         if episodes_status == 200 and episodes_data.get('success'):
-            episode_list = episodes_data.get("results", {}).get("episodes", [])
-            formatted_details["episodes"] = self._format_episodes(episode_list)
+            raw_episodes = episodes_data.get("results", [])
+            if not isinstance(raw_episodes, list):
+                 logger.warning(f"Expected a list for episodes but got {type(raw_episodes)}. Defaulting to empty.")
+                 raw_episodes = []
+            formatted_details["episodes"] = self._format_episodes(raw_episodes)
         else:
             logger.warning(f"AnimeController: Failed to fetch episodes for {anime_id}. Status: {episodes_status}, Data: {episodes_data}")
 
         characters_data, characters_status = self.anime_api_service.get_characters_list(anime_id)
         if characters_status == 200 and characters_data.get('success'):
-            formatted_details["characters_voice_actors"] = self._format_characters_voice_actors(characters_data.get("results", []))
+            character_list = characters_data.get("results", [])
+            if not isinstance(character_list, list):
+                logger.warning(f"Expected a list for characters but got {type(character_list)}. Defaulting to empty.")
+                character_list = []
+            formatted_details["characters_voice_actors"] = self._format_characters_voice_actors(character_list)
         else:
             logger.warning(f"AnimeController: Failed to fetch characters for {anime_id}. Status: {characters_status}, Data: {characters_data}")
 
-        related_data, related_status = self.anime_api_service.get_related_anime(anime_id)
-        if related_status == 200 and related_data.get('success'):
-            formatted_details["related_anime"] = self._format_anime_list_common(related_data.get("results", []))
-        else:
-            logger.warning(f"AnimeController: Failed to fetch related anime for {anime_id}. Status: {related_status}, Data: {related_data}")
-
-        recommended_data, recommended_status = self.anime_api_service.get_recommended_anime(anime_id)
-        if recommended_status == 200 and recommended_data.get('success'):
-            formatted_details["recommended_anime"] = self._format_anime_list_common(recommended_data.get("results", []))
-        else:
-            logger.warning(f"AnimeController: Failed to fetch recommended anime for {anime_id}. Status: {recommended_status}, Data: {recommended_data}")
-
         return formatted_details, 200
-
-    def get_qtip_info_data(self, qtip_id: int) -> tuple[dict, int]:
-        logger.debug(f"AnimeController: Fetching Qtip info for ID: {qtip_id}")
-        raw_data, status_code = self.anime_api_service.get_qtip_info(qtip_id)
-        if status_code != 200:
-            return raw_data, status_code
-        return raw_data.get("results", {}), 200
 
     def get_character_details_data(self, character_id: str) -> tuple[dict, int]:
         logger.debug(f"AnimeController: Fetching character details for ID: {character_id}")
@@ -335,47 +365,6 @@ class AnimeController:
             return raw_data, status_code
         return {"streaming_links": self._format_streaming_info(raw_data.get("results", {}))}, 200
 
-    def _format_anime_list_home(self, anime_list: list) -> list:
-        formatted = []
-        if not isinstance(anime_list, list):
-            logger.warning(f"Data for home formatting is not a list: {type(anime_list)}")
-            return []
-        for anime in anime_list:
-            if not anime.get("id"):
-                continue
-            formatted.append({
-                "id": anime.get("id"),
-                "title": anime.get("title"),
-                "poster_url": anime.get("poster"),
-                "jname": anime.get("jname") or anime.get("japanese_title"),
-                "show_type": anime.get("showType") or anime.get("type"),
-                "score": anime.get("score"),
-                "description": anime.get("description"),
-                "tvInfo": anime.get("tvInfo")
-            })
-        return formatted
-
-    def _format_anime_list_common(self, anime_list: list) -> list:
-        formatted = []
-        if not isinstance(anime_list, list):
-             logger.warning(f"Data for formatting is not a list: {type(anime_list)}")
-             return []
-
-        for anime in anime_list:
-            if not isinstance(anime, dict) or not anime.get("id"):
-                continue
-            formatted.append({
-                "id": anime.get("id"),
-                "title": anime.get("title"),
-                "poster_url": anime.get("poster"),
-                "jname": anime.get("jname") or anime.get("japanese_title"),
-                "show_type": anime.get("showType") or anime.get("type"),
-                "score": anime.get("score"),
-                "description": anime.get("description"),
-                "tvInfo": anime.get("tvInfo")
-            })
-        return formatted
-
     def _format_schedule_list(self, schedule_list: list) -> list:
         formatted = []
         if not isinstance(schedule_list, list):
@@ -391,7 +380,7 @@ class AnimeController:
                 "jname": item.get("japanese_title"),
                 "release_date": item.get("releaseDate"),
                 "release_time": item.get("time"),
-                "episode_no": item.get("episode_no"),
+                "episode_no": item.get("episode"),
                 "poster_url": item.get("poster"),
                 "show_type": item.get("showType")
             })
@@ -445,15 +434,12 @@ class AnimeController:
         return formatted
 
     def _format_characters_voice_actors(self, characters_data: list) -> list:
-        # --- START OF FIX: Add a type check to prevent crashes ---
         if not isinstance(characters_data, list):
             logger.warning(f"Characters data is not a list ({type(characters_data)}), returning empty list.")
             return []
-        # --- END OF FIX ---
 
         formatted = []
         for char_info in characters_data:
-            # Add another check here for safety
             if not isinstance(char_info, dict):
                 logger.warning(f"Skipping character formatting because item is not a dict: {char_info}")
                 continue
@@ -541,7 +527,7 @@ class AnimeController:
             if referer:
                 headers['Referer'] = referer
             else:
-                headers['Referer'] = 'https://9anime.to/' # Generic fallback
+                headers['Referer'] = 'https://9anime.to/'
             req = s.get(video_url, headers=headers, stream=True, timeout=60, verify=False)
             req.raise_for_status()
             content_type = req.headers.get('Content-Type', 'application/octet-stream')
@@ -564,5 +550,3 @@ class AnimeController:
         except requests.exceptions.RequestException as e:
             logger.error(f"AnimeController: Error proxying video stream from {video_url}: {e}")
             return Response(f"Error proxying video: {e}", status=502)
-
-anime_controller = AnimeController()
