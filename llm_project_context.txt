@@ -5782,9 +5782,9 @@ function HomeView() {
         />
       )}
 
-      {homeData.spotlights && <Spotlight spotlights={homeData.spotlights} />}
+      {homeData.spotlights && homeData.spotlights.length > 0 && <Spotlight spotlights={homeData.spotlights} />}
 
-      {homeData.trending && (
+      {homeData.trending && homeData.trending.length > 0 && (
         <div className="p-4 md:p-0">
           <h2 className="font-bold text-2xl text-[#ffbade] capitalize mb-4">Trending</h2>
           <Trending trending={homeData.trending} />
@@ -5793,7 +5793,7 @@ function HomeView() {
 
       <div className="flex flex-col lg:flex-row gap-8 mt-8 px-4 md:px-0">
         <main className="flex-grow lg:w-3/4 space-y-12">
-          {homeData.latest_episode && (
+          {homeData.latest_episode && homeData.latest_episode.length > 0 && (
             <CategoryCard
               label="Latest Episodes"
               data={homeData.latest_episode}
@@ -5803,7 +5803,7 @@ function HomeView() {
               onMouseLeave={handleMouseLeave}
             />
           )}
-          {homeData.latest_completed && (
+          {homeData.latest_completed && homeData.latest_completed.length > 0 && (
             <CategoryCard
               label="Recently Completed"
               data={homeData.latest_completed}
@@ -5814,37 +5814,42 @@ function HomeView() {
             />
           )}
         </main>
-        <aside className="lg:w-1/4 flex-shrink-0 space-y-8">
-          {homeData.top_airing && (
-            <Cart
-              label="Top Airing"
-              data={homeData.top_airing}
-              path="top-airing"
-              cardRefs={cardRefs}
-              onMouseEnter={handleCardMouseEnter}
-              onMouseLeave={handleMouseLeave}
-            />
+        <aside className="lg:w-1/4 flex-shrink-0 space-y-12">
+          {/* --- START OF FIX: Added titles for sidebar sections --- */}
+          {homeData.top_airing && homeData.top_airing.length > 0 && (
+            <div>
+              <h2 className="font-bold text-2xl text-[#ffbade] capitalize mb-4">Top Airing</h2>
+              <Cart
+                data={homeData.top_airing}
+                cardRefs={cardRefs}
+                onMouseEnter={handleCardMouseEnter}
+                onMouseLeave={handleMouseLeave}
+              />
+            </div>
           )}
-          {homeData.most_popular && (
-            <Cart
-              label="Most Popular"
-              data={homeData.most_popular}
-              path="most-popular"
-              cardRefs={cardRefs}
-              onMouseEnter={handleCardMouseEnter}
-              onMouseLeave={handleMouseLeave}
-            />
+          {homeData.most_popular && homeData.most_popular.length > 0 && (
+            <div>
+              <h2 className="font-bold text-2xl text-[#ffbade] capitalize mb-4">Most Popular</h2>
+              <Cart
+                data={homeData.most_popular}
+                cardRefs={cardRefs}
+                onMouseEnter={handleCardMouseEnter}
+                onMouseLeave={handleMouseLeave}
+              />
+            </div>
           )}
-           {homeData.most_favorite && (
-            <Cart
-              label="Most Favorited"
-              data={homeData.most_favorite}
-              path="most-favorite"
-              cardRefs={cardRefs}
-              onMouseEnter={handleCardMouseEnter}
-              onMouseLeave={handleMouseLeave}
-            />
+           {homeData.most_favorite && homeData.most_favorite.length > 0 && (
+            <div>
+               <h2 className="font-bold text-2xl text-[#ffbade] capitalize mb-4">Most Favorited</h2>
+               <Cart
+                data={homeData.most_favorite}
+                cardRefs={cardRefs}
+                onMouseEnter={handleCardMouseEnter}
+                onMouseLeave={handleMouseLeave}
+              />
+            </div>
           )}
+          {/* --- END OF FIX --- */}
         </aside>
       </div>
     </div>
@@ -26618,6 +26623,7 @@ class AnimeAPIService:
             "tvInfo": tv_info
         }
 
+    # --- START OF DEFINITIVE FIX ---
     def get_home_info(self) -> tuple[dict, int]:
         home_url = f"{V1_BASE_URL}/home"
         html_content, status_code = self._make_request(home_url)
@@ -26625,11 +26631,10 @@ class AnimeAPIService:
             logger.error(f"Failed to fetch homepage HTML from {home_url}. Status: {status_code}")
             return {"error": "Could not fetch homepage HTML from source."}, status_code
 
-        logger.info(f"Successfully fetched homepage HTML (length: {len(html_content)}). Parsing all sections...")
+        logger.info(f"Successfully fetched homepage HTML. Parsing all sections...")
         soup = BeautifulSoup(html_content, "lxml")
 
-        # --- PARSER FUNCTIONS ---
-        def run_parser(section_name: str, selector: str, parser_func, container=soup) -> list:
+        def run_parser_on_soup(section_name: str, selector: str, parser_func, container=soup) -> list:
             elements = container.select(selector)
             if not elements:
                 logger.warning(f"No items found for section '{section_name}' with selector: {selector}")
@@ -26640,7 +26645,7 @@ class AnimeAPIService:
             return data
 
         def parse_spotlight(el: Tag) -> dict | None:
-            title_el = self._safe_parse(el, ".desi-head-title a")
+            title_el = self._safe_parse(el, ".desi-head-title.dynamic-name")
             if not title_el: return None
 
             id_raw = self._safe_parse(el, ".desi-buttons a.btn-play", 'href')
@@ -26654,18 +26659,17 @@ class AnimeAPIService:
             }
 
         def parse_trending(el: Tag) -> dict | None:
-            link_el = self._safe_parse(el, ".film-poster a", 'href')
+            link_el = self._safe_parse(el, "a.film-poster", 'href')
             if not link_el: return None
 
             return {
-                "id": link_el.strip("/"),
+                "id": link_el.split("/")[-1],
                 "poster_url": self._safe_parse(el, "img", 'data-src'),
                 "title": self._safe_parse(el, ".film-title", text=True),
                 "number": self._safe_parse(el, ".number span", text=True),
             }
 
         def scrape_page(path: str, parser_func, limit: int = 18):
-            """Helper function to scrape a specific page and parse its items."""
             logger.info(f"Scraping separate page: /{path}...")
             url = f"{V1_BASE_URL}/{path}"
             html_content, status_code = self._make_request(url)
@@ -26692,15 +26696,9 @@ class AnimeAPIService:
             return items
 
         try:
-            # HYBRID APPROACH:
-            # 1. Scrape Spotlight and Trending from the main /home page content
-            spotlights = run_parser("Spotlights", "#slider .swiper-slide", parse_spotlight, container=soup)
-            trending = run_parser("Trending", "#anime-trending .swiper-slide", parse_trending, container=soup)
-
-            # 2. Scrape all other sections from their own dedicated pages for reliability and stability
             results = {
-                "spotlights": spotlights,
-                "trending": trending,
+                "spotlights": run_parser_on_soup("Spotlights", "#slider .swiper-slide", parse_spotlight, container=soup),
+                "trending": run_parser_on_soup("Trending", "#trending-home .swiper-slide", parse_trending, container=soup),
                 "latest_episode": scrape_page("recently-updated", self._parse_anime_card),
                 "latest_completed": scrape_page("completed", self._parse_anime_card),
                 "top_airing": scrape_page("top-airing", self._parse_anime_card, limit=7),
